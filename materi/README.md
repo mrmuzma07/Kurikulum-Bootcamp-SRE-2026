@@ -97,7 +97,18 @@ materi/
 │   │   └── evaluasi/
 │   │       ├── latihan.md
 │   │       └── kuis-dan-jawaban.md
-│   ├── modul-2.3-metallb/                ⏳ menyusul
+│   ├── modul-2.3-metallb/                ✅ tersedia
+│   │   ├── README.md                ← panduan modul & rencana 2 hari
+│   │   ├── 01-kenapa-metallb.md
+│   │   ├── 02-l2-mode-arp.md
+│   │   ├── 03-bgp-mode-konsep.md
+│   │   ├── 04-konfigurasi-integrasi-k3s.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-metallb-l2-expose.md
+│   │   │   └── LAB-02-troubleshooting-arp.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
 │   └── modul-2.4-operasi-troubleshooting/ ⏳ menyusul
 ├── fase-3-opentofu/                 ⏳ menyusul
 ├── fase-4-ansible/                  ⏳ menyusul
