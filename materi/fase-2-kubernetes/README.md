@@ -10,7 +10,7 @@ Minggu 4–5
 | # | Modul | Durasi | Status |
 |---|---|---|---|
 | 2.1 | Konsep & k3d untuk Latihan | 3 hari | ✅ Tersedia |
-| 2.2 | k3s untuk Simulasi Production | 3 hari | ⏳ menyusul |
+| 2.2 | k3s untuk Simulasi Production | 3 hari | ✅ Tersedia |
 | 2.3 | MetalLB: LoadBalancer Bare-Metal | 2 hari | ⏳ menyusul |
 | 2.4 | Operasi & Troubleshooting | 2 hari | ⏳ menyusul |
 

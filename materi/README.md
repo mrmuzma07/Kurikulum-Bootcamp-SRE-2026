@@ -85,7 +85,18 @@ materi/
 │   │   └── evaluasi/
 │   │       ├── latihan.md
 │   │       └── kuis-dan-jawaban.md
-│   ├── modul-2.2-k3s-production/          ⏳ menyusul
+│   ├── modul-2.2-k3s-production/          ✅ tersedia
+│   │   ├── README.md                ← panduan modul & rencana 3 hari
+│   │   ├── 01-k3s-arsitektur-install.md
+│   │   ├── 02-k3s-multi-node-ha.md
+│   │   ├── 03-disable-komponen-ingress.md
+│   │   ├── 04-topologi-onprem.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-k3s-single-node-vm.md
+│   │   │   └── LAB-02-k3s-multi-node-topologi.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
 │   ├── modul-2.3-metallb/                ⏳ menyusul
 │   └── modul-2.4-operasi-troubleshooting/ ⏳ menyusul
 ├── fase-3-opentofu/                 ⏳ menyusul
