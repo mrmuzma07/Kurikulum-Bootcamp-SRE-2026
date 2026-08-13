@@ -10,7 +10,7 @@ Minggu 3
 | # | Modul | Durasi | Status |
 |---|---|---|---|
 | 1.1 | Container Fundamental | 4 hari | ✅ Tersedia |
-| 1.2 | OrbStack sebagai Lab Harian | 1 hari | ⏳ |
+| 1.2 | OrbStack sebagai Lab Harian | 1 hari | ✅ Tersedia |
 
 ## Capaian Fase (Wajib)
 
@@ -20,6 +20,10 @@ Minggu 3
 - [ ] Bisa build image multi-arch (`buildx`) untuk ARM64 — waspada image amd64-only
 - [ ] Bisa menjalankan compose stack (app + database) di OrbStack
 - [ ] Bisa membandingkan OrbStack vs Docker Desktop & tahu kenapa OrbStack dipilih di Apple Silicon
+- [ ] Bisa membuat & mengelola OrbStack Machine Linux (SSH, filesystem sharing, IP stabil)
+- [ ] Bisa mengatur resource limit OrbStack agar Mac tetap responsif
+- [ ] Bisa menjalankan k3d cluster (create/delete, multi-node, port mapping) & deploy app via Ingress
+- [ ] Bisa memutuskan kapan pakai k3d (latihan) vs VM OrbStack + k3s (simulasi production)
 
 ## Cara Belajar
 

@@ -61,8 +61,33 @@ materi/
 │   │   └── evaluasi/
 │   │       ├── latihan.md
 │   │       └── kuis-dan-jawaban.md
-│   └── modul-1.2-orbstack-lab/             ⏳ menyusul
-├── fase-2-kubernetes/               ⏳ menyusul
+│   └── modul-1.2-orbstack-lab/             ✅ tersedia
+│       ├── README.md                ← panduan modul & rencana 1 hari
+│       ├── 01-orbstack-machine.md
+│       ├── 02-resource-limit-vs-docker-desktop.md
+│       ├── 03-k3d-on-orbstack.md
+│       ├── lab/
+│       │   └── LAB-01-k3d-cluster.md
+│       └── evaluasi/
+│           ├── latihan.md
+│           └── kuis-dan-jawaban.md
+├── fase-2-kubernetes/
+│   ├── README.md                    ← overview fase (Minggu 4–5)
+│   ├── modul-2.1-konsep-k3d/             ✅ tersedia
+│   │   ├── README.md                ← panduan modul & rencana 3 hari
+│   │   ├── 01-arsitektur-k8s.md
+│   │   ├── 02-objek-inti.md
+│   │   ├── 03-k3d-latihan-harian.md
+│   │   ├── 04-kubectl-survival-kit.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-pod-deployment-service.md
+│   │   │   └── LAB-02-ingress-configmap-secret.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+│   ├── modul-2.2-k3s-production/          ⏳ menyusul
+│   ├── modul-2.3-metallb/                ⏳ menyusul
+│   └── modul-2.4-operasi-troubleshooting/ ⏳ menyusul
 ├── fase-3-opentofu/                 ⏳ menyusul
 ├── fase-4-ansible/                  ⏳ menyusul
 ├── fase-5-helm/                     ⏳ menyusul
