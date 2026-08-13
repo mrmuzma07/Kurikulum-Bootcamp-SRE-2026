@@ -109,8 +109,19 @@ materi/
 │   │   └── evaluasi/
 │   │       ├── latihan.md
 │   │       └── kuis-dan-jawaban.md
-│   └── modul-2.4-operasi-troubleshooting/ ⏳ menyusul
-├── fase-3-opentofu/                 ⏳ menyusul
+│   ├── modul-2.4-operasi-troubleshooting/ ✅ tersedia
+│   │   ├── README.md                ← panduan modul & rencana 2 hari
+│   │   ├── 01-debug-workload.md
+│   │   ├── 02-resource-hpa.md
+│   │   ├── 03-etcd-backup-restore-k3s.md
+│   │   ├── 04-upgrade-k3s-rolling.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-chaos-debug-workload.md
+│   │   │   └── LAB-02-etcd-backup-restore-rolling-upgrade.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+├── fase-3-opentofu/                 ⏳ menyusul"}① 天天中彩票未functions.Edit Ադրբեջary  (...)  code 
 ├── fase-4-ansible/                  ⏳ menyusul
 ├── fase-5-helm/                     ⏳ menyusul
 ├── fase-6-gitops/                   ⏳ menyusul

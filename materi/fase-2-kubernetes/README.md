@@ -12,7 +12,7 @@ Minggu 4–5
 | 2.1 | Konsep & k3d untuk Latihan | 3 hari | ✅ Tersedia |
 | 2.2 | k3s untuk Simulasi Production | 3 hari | ✅ Tersedia |
 | 2.3 | MetalLB: LoadBalancer Bare-Metal | 2 hari | ✅ Tersedia |
-| 2.4 | Operasi & Troubleshooting | 2 hari | ⏳ menyusul |
+| 2.4 | Operasi & Troubleshooting | 2 hari | ✅ Tersedia |
 
 ## Capaian Fase (Wajib)
 
@@ -22,8 +22,13 @@ Minggu 4–5
 - [ ] Bisa memakai `kubectl` survival kit: get, describe, logs, exec, port-forward, top, labels/selectors, namespaces
 - [ ] Bisa install k3s single-node & multi-node di VM OrbStack (disable komponen yang tidak perlu)
 - [ ] Bisa memasang MetalLB (L2 mode) & meng-expose Service `type=LoadBalancer` yang diakses dari Mac
-- [ ] Bisa debug pola umum: CrashLoopBackOff, ImagePullBackOff, Pending, OOMKilled
-- [ ] Bisa backup & restore snapshot etcd k3s
+- [x] Bisa debug pola umum: CrashLoopBackOff, ImagePullBackOff, Pending, OOMKilled
+- [x] Bisa mengelola resource, metrics-server, HPA, PDB, cordon/drain/uncordon, dan rolling maintenance
+- [x] Bisa backup & restore snapshot etcd k3s pada cluster disposable dengan RPO/RTO terdokumentasi
+- [x] Bisa merencanakan rolling upgrade k3s dengan quorum, stop condition, dan rollback decision
+- [x] Bisa menulis evidence dan incident timeline dengan context safety
+
+> Status capaian di atas berarti materi dan lab tersedia; eksekusi cluster tetap harus dilakukan pada environment lab yang disetujui.
 
 ## Cara Belajar
 
