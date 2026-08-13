@@ -121,7 +121,22 @@ materi/
 │   │   └── evaluasi/
 │   │       ├── latihan.md
 │   │       └── kuis-dan-jawaban.md
-├── fase-3-opentofu/                 ⏳ menyusul"}① 天天中彩票未functions.Edit Ադրբեջary  (...)  code 
+├── fase-3-opentofu/                 ✅ tersedia
+│   ├── README.md                    ← overview fase (Minggu 6–7)
+│   ├── modul-3.1-dasar-opentofu/   ✅ tersedia
+│   │   ├── README.md                ← panduan modul & rencana 2 hari
+│   │   ├── 01-konsep-iac-opentofu.md
+│   │   ├── 02-hcl-resource-variable-output-provider.md
+│   │   ├── 03-workflow-init-plan-apply-destroy.md
+│   │   ├── 04-state-remote-import-drift.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-tofu-docker-web-server.md
+│   │   │   └── LAB-02-state-minio-import-drift.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+│   ├── modul-3.2-modul-pola-produksi/ ⏳ menyusul
+│   └── modul-3.3-konteks-onprem/      ⏳ menyusul"}① 天天中彩票未functions.Edit Ադրբեջary  (...)  code 
 ├── fase-4-ansible/                  ⏳ menyusul
 ├── fase-5-helm/                     ⏳ menyusul
 ├── fase-6-gitops/                   ⏳ menyusul
