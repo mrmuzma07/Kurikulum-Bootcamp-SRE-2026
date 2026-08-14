@@ -159,8 +159,43 @@ materi/
 │       └── evaluasi/
 │           ├── latihan.md
 │           └── kuis-dan-jawaban.md
-│   └── (Fase 3 lengkap — Modul 3.1, 3.2, dan 3.3 tersedia) 
-├── fase-4-ansible/                  ⏳ menyusul
+│   └── (Fase 3 lengkap — Modul 3.1, 3.2, dan 3.3 tersedia)
+├── fase-4-ansible/                  ✅ tersedia
+│   ├── README.md                    ← overview fase & boundary OpenTofu → Ansible → k3s
+│   ├── modul-4.1-fundamental-ansible/ ✅ tersedia
+│   │   ├── README.md
+│   │   ├── 01-arsitektur-inventory-ssh.md
+│   │   ├── 02-ad-hoc-playbook-yaml.md
+│   │   ├── 03-idempotency-variables-facts-handlers.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-inventory-ssh-ad-hoc.md
+│   │   │   └── LAB-02-playbook-common-idempotent.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+│   ├── modul-4.2-pola-produksi-ansible/ ✅ tersedia
+│   │   ├── README.md
+│   │   ├── 01-roles-collections-repository.md
+│   │   ├── 02-jinja-variables-vault.md
+│   │   ├── 03-check-diff-limit-error-handling-ci.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-role-common-hardening.md
+│   │   │   └── LAB-02-vault-safe-ci-validation.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+│   └── modul-4.3-ansible-k3s-onprem/ ✅ tersedia
+│       ├── README.md
+│       ├── 01-opentofu-inventory-readiness.md
+│       ├── 02-k3s-install-upgrade-role.md
+│       ├── 03-hardening-patching-rolling.md
+│       ├── 04-backup-health-evidence-rebuild.md
+│       ├── lab/
+│       │   ├── LAB-01-handoff-k3s-multinode.md
+│       │   └── LAB-02-rolling-patching-readiness.md
+│       └── evaluasi/
+│           ├── latihan.md
+│           └── kuis-dan-jawaban.md
 ├── fase-5-helm/                     ⏳ menyusul
 ├── fase-6-gitops/                   ⏳ menyusul
 ├── fase-7-observability/            ⏳ menyusul

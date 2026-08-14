@@ -89,5 +89,5 @@ Production On-Prem Provisioning Lane
 
 - [Modul 3.2 — Modul & Pola Produksi](modul-3.2-modul-pola-produksi/README.md) menyediakan reusable module, environment isolation, address safety, secret boundary, dan CI plan pattern.
 - [Modul 3.3 — Konteks On-Prem & Provisioning](modul-3.3-konteks-onprem/README.md) membahas provider Proxmox/vSphere/libvirt/CloudInit/HTTP-REST, simulasi lokal, readiness, serta boundary OpenTofu → Ansible → k3s. Provider dan runtime production tetap tidak diklaim teruji tanpa execution evidence.
-- **Fase 4 — Ansible:** masih menyusul; akan menerima metadata non-secret hasil provisioning untuk bootstrap OS dan k3s.
+- [Fase 4 — Ansible](../fase-4-ansible/README.md) menerima metadata non-secret hasil provisioning untuk bootstrap OS dan k3s. Runtime Ansible, SSH, dan k3s tetap belum diverifikasi tanpa execution evidence.
 - **Fase 5 — Helm & Fase 6 — GitOps:** masih menyusul; mengelola aplikasi di atas cluster yang infrastrukturnya telah siap dan konsisten.
