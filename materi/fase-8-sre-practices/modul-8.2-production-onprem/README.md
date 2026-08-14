@@ -66,7 +66,7 @@ Jangan mencetak backup credential, encryption key, kubeconfig, k3s token, raw ar
 - [Modul 2.4 — Operasi](../../fase-2-kubernetes/modul-2.4-operasi-troubleshooting/README.md) menyediakan etcd, drain, PDB, dan rolling upgrade.
 - [Fase 6 — GitOps](../../fase-6-gitops/README.md) melakukan rehydration desired state.
 - [Fase 7 — Observability](../../fase-7-observability/README.md) memvalidasi telemetry dan SLO setelah recovery.
-- Fase 9 — Capstone (menyusul) akan menguji rebuild end-to-end; belum tersedia.
+- [Fase 9 — Capstone](../../fase-9-capstone/README.md) menguji rebuild end-to-end dan recovery evidence.
 
 ## Status Runtime
 

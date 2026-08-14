@@ -104,7 +104,7 @@ Dashboard green, alert firing, `kubectl` Healthy, Velero `Completed`, snapshot t
 - [Fase 5 — Helm](../fase-5-helm/README.md) menyediakan chart lifecycle dan rollback caveat.
 - [Fase 6 — GitOps](../fase-6-gitops/README.md) menyediakan promotion evidence dan desired-state reconciliation.
 - [Fase 7 — Observability](../fase-7-observability/README.md) menyediakan telemetry, alert, dashboard, dan SLO signal.
-- Fase 9 — Capstone (menyusul) akan menggabungkan fondasi ini dalam rebuild dan Game Day; Fase 9 belum tersedia.
+- [Fase 9 — Capstone](../fase-9-capstone/README.md) menggabungkan fondasi ini dalam rebuild, delivery evidence, recovery, dan Game Day.
 
 ## Deliverables
 

@@ -88,7 +88,7 @@ Blameless bukan berarti tanpa accountability: owner, due date, verification, dan
 - [Fase 7](../../fase-7-observability/README.md) memberikan query/dashboard/alert reference.
 - [Fase 6](../../fase-6-gitops/README.md) memberikan revision, promotion, dan rollback reference.
 - [Fase 2.4](../../fase-2-kubernetes/modul-2.4-operasi-troubleshooting/README.md) memberikan troubleshooting dan evidence discipline.
-- Fase 9 — Capstone (menyusul) akan menggunakan minimal tiga runbook dan postmortem Game Day; belum tersedia.
+- [Fase 9 — Capstone](../../fase-9-capstone/README.md) menggunakan minimal tiga runbook dan postmortem Game Day.
 
 ## Status Runtime
 

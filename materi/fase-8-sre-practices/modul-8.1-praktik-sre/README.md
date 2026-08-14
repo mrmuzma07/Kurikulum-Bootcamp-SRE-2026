@@ -63,7 +63,7 @@ Jangan menulis nomor telepon, webhook, token, raw alert payload, PII, authorizat
 
 - Lanjutkan signal ke [Fase 7](../../fase-7-observability/README.md).
 - Lanjutkan delivery gate ke [Fase 6](../../fase-6-gitops/README.md).
-- Lanjutkan readiness dan Game Day ke Fase 9 (menyusul) bila tersedia.
+- Lanjutkan readiness dan Game Day ke [Fase 9 — Capstone](../../fase-9-capstone/README.md).
 
 ## Status Runtime
 

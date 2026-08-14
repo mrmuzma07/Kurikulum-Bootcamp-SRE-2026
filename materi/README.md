@@ -339,7 +339,38 @@ materi/
 │   │   └── evaluasi/
 │   │       ├── latihan.md
 │   │       └── kuis-dan-jawaban.md
-└── fase-9-capstone/                 ⏳ menyusul
+└── fase-9-capstone/                 ✅ tersedia
+    ├── README.md
+    ├── modul-9.1-platform-rebuild/   ✅ tersedia
+    │   ├── README.md
+    │   ├── 01-capstone-arsitektur-boundary.md
+    │   ├── 02-opentofu-ansible-k3s-rebuild.md
+    │   ├── lab/
+    │   │   ├── LAB-01-infrastructure-rebuild.md
+    │   │   └── LAB-02-k3s-bootstrap-handoff.md
+    │   └── evaluasi/
+    │       ├── latihan.md
+    │       └── kuis-dan-jawaban.md
+    ├── modul-9.2-delivery-observability/ ✅ tersedia
+    │   ├── README.md
+    │   ├── 01-gitops-ci-promotion.md
+    │   ├── 02-observability-slo-backup-evidence.md
+    │   ├── lab/
+    │   │   ├── LAB-01-end-to-end-promotion.md
+    │   │   └── LAB-02-telemetry-alert-backup-evidence.md
+    │   └── evaluasi/
+    │       ├── latihan.md
+    │       └── kuis-dan-jawaban.md
+    └── modul-9.3-game-day-graduation/ ✅ tersedia
+        ├── README.md
+        ├── 01-game-day-oncall-scenarios.md
+        ├── 02-readiness-review-postmortem.md
+        ├── lab/
+        │   ├── LAB-01-game-day-drill.md
+        │   └── LAB-02-destroy-rebuild-graduation.md
+        └── evaluasi/
+            ├── latihan.md
+            └── kuis-dan-jawaban.md
 ```
 
 ## Konvensi Penamaan
@@ -357,4 +388,3 @@ materi/
 2. Baca materi sambil **langsung praktik di terminal** (jangan cuma dibaca).
 3. Kerjakan lab sampai semua ✅ acceptance criteria terpenuhi.
 4. Tutup dengan latihan + kuis. Nilai kuis minimal 80% sebelum lanjut modul berikutnya.
-"}① 天天中彩票未functions.Edit Ադրբեջary  (...)  code 
