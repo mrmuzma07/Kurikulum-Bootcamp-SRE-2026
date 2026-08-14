@@ -124,7 +124,7 @@ Tidak ada runtime target atau context aktif pada preflight sebelumnya. Oleh kare
 - [Fase 2 — Kubernetes](../fase-2-kubernetes/README.md) menyediakan target, context safety, node metrics, rollout, dan troubleshooting.
 - [Fase 5 — Helm](../fase-5-helm/README.md) menyediakan chart, values, lifecycle, dan observability packaging.
 - [Fase 6 — GitOps](../fase-6-gitops/README.md) menyediakan delivery/reconciliation; observability menjadi evidence gate.
-- Fase 8 akan menggunakan alert, incident, error budget, dan runbook yang dirancang di sini.
+- [Fase 8 — Praktik SRE & Production On-Prem](../fase-8-sre-practices/README.md) menggunakan alert, incident, error budget, dan runbook yang dirancang di sini.
 
 ## Status Runtime
 

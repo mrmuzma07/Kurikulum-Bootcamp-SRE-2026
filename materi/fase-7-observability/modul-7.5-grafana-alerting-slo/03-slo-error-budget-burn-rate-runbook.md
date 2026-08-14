@@ -59,7 +59,7 @@ Budget turun tanpa alert: cek query denominator, missing data, evaluator, and ro
 
 ## Kaitan
 
-Lanjutkan ke Fase 8 untuk incident response dan error-budget practice. Hubungkan bukti delivery dari [Fase 6](../../fase-6-gitops/README.md).
+Lanjutkan ke [Fase 8 — Praktik SRE](../../fase-8-sre-practices/README.md) untuk incident response dan error-budget practice. Hubungkan bukti delivery dari [Fase 6](../../fase-6-gitops/README.md).
 
 ## Status Runtime
 

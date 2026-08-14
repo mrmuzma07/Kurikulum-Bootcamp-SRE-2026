@@ -42,4 +42,4 @@ Soal 1–10 bernilai 2 poin, soal 11–15 bernilai 4 poin. Total 40 poin; lulus 
 
 ## Kaitan
 
-Setelah lulus, peserta siap menghubungkan GitOps evidence dengan [Fase 7 Observability](../../../fase-7-observability/README.md) dan praktik reliability Fase 8.
+Setelah lulus, peserta siap menghubungkan GitOps evidence dengan [Fase 7 Observability](../../../fase-7-observability/README.md) dan [Fase 8 — Praktik SRE](../../../fase-8-sre-practices/README.md).

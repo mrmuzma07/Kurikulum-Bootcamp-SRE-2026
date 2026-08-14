@@ -270,4 +270,4 @@ Buat MR → squash & merge.
 
 ---
 
-**Modul 2.2 selesai.** Lanjut ke [Modul 2.3 — MetalLB](../modul-2.3-metallb/README.md) (menyusul) — pasang LoadBalancer bare-metal di cluster HA ini.
+**Modul 2.2 selesai.** Lanjut ke [Modul 2.3 — MetalLB](../../modul-2.3-metallb/README.md) (menyusul) — pasang LoadBalancer bare-metal di cluster HA ini.

@@ -307,7 +307,38 @@ materi/
 │       └── evaluasi/
 │           ├── latihan.md
 │           └── kuis-dan-jawaban.md
-├── fase-8-sre-practices/            ⏳ menyusul
+├── fase-8-sre-practices/            ✅ tersedia
+│   ├── README.md
+│   ├── modul-8.1-praktik-sre/        ✅ tersedia
+│   │   ├── README.md
+│   │   ├── 01-sli-slo-error-budget-toil.md
+│   │   ├── 02-oncall-incident-response-change-management.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-slo-error-budget-oncall.md
+│   │   │   └── LAB-02-incident-response-change-freeze.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+│   ├── modul-8.2-production-onprem/   ✅ tersedia
+│   │   ├── README.md
+│   │   ├── 01-network-storage-hardware-access.md
+│   │   ├── 02-backup-restore-upgrade-security-dr.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-velero-etcd-backup-restore.md
+│   │   │   └── LAB-02-onprem-readiness-patching-trivy.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+│   ├── modul-8.3-runbook-dokumentasi/  ✅ tersedia
+│   │   ├── README.md
+│   │   ├── 01-runbook-node-disk-certificate-crashloop.md
+│   │   ├── 02-runbook-metallb-topology-evidence-postmortem.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-runbook-validation-drill.md
+│   │   │   └── LAB-02-postmortem-blameless.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
 └── fase-9-capstone/                 ⏳ menyusul
 ```
 

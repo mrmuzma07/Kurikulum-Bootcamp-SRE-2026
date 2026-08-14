@@ -51,7 +51,7 @@ Git revert atau ArgoCD rollback tidak otomatis membalikkan migration, CRD, PVC, 
 - [Modul 6.2](../modul-6.2-argocd/README.md)
 - [Fase 5 — Helm](../../fase-5-helm/README.md)
 - Fase 7 untuk metrics, logs, traces, dan SLO.
-- Fase 8 untuk incident response, error budget, dan runbook.
+- [Fase 8 — Praktik SRE](../../fase-8-sre-practices/README.md) untuk incident response, error budget, dan runbook.
 
 ## Catatan SRE
 

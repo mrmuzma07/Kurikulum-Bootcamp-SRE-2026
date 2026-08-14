@@ -257,4 +257,4 @@ Buat MR → squash & merge.
 
 ---
 
-**Fase 1 (Container & OrbStack) selesai!** Lanjut ke [Fase 2 — Kubernetes](../../fase-2-kubernetes/README.md) (menyusul).
+**Fase 1 (Container & OrbStack) selesai!** Lanjut ke [Fase 2 — Kubernetes](../../../fase-2-kubernetes/README.md) (menyusul).
