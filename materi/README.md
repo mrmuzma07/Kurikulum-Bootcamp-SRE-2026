@@ -220,7 +220,40 @@ materi/
 │       └── evaluasi/
 │           ├── latihan.md
 │           └── kuis-dan-jawaban.md
-├── fase-6-gitops/                   ⏳ menyusul
+├── fase-6-gitops/                   ✅ tersedia
+│   ├── README.md                    ← overview fase & boundary CI → GitOps → ArgoCD
+│   ├── modul-6.1-gitlab-ci-cd/      ✅ tersedia
+│   │   ├── README.md
+│   │   ├── 01-pipeline-stages-jobs-rules.md
+│   │   ├── 02-runner-artifacts-cache-environment.md
+│   │   ├── 03-iac-ansible-pipeline-approval.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-ci-lint-test-build-push.md
+│   │   │   └── LAB-02-iac-plan-approval-lab-run.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+│   ├── modul-6.2-argocd/             ✅ tersedia
+│   │   ├── README.md
+│   │   ├── 01-gitops-source-of-truth-repo-structure.md
+│   │   ├── 02-argocd-install-application-sync.md
+│   │   ├── 03-applicationset-secrets-drift-selfheal.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-argocd-application-sync.md
+│   │   │   └── LAB-02-drift-selfheal-applicationset.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+│   └── modul-6.3-end-to-end-flow/    ✅ tersedia
+│       ├── README.md
+│       ├── 01-promotion-flow-evidence.md
+│       ├── 02-progressive-delivery-rollback.md
+│       ├── lab/
+│       │   ├── LAB-01-end-to-end-gitops-flow.md
+│       │   └── LAB-02-canary-blue-green-introduction.md
+│       └── evaluasi/
+│           ├── latihan.md
+│           └── kuis-dan-jawaban.md
 ├── fase-7-observability/            ⏳ menyusul
 ├── fase-8-sre-practices/            ⏳ menyusul
 └── fase-9-capstone/                 ⏳ menyusul

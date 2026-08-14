@@ -109,7 +109,7 @@ Helm bukan pengganti Kubernetes controller atau GitOps reconciliation. Release s
 - [Modul 2.1 — Konsep Kubernetes](../fase-2-kubernetes/modul-2.1-konsep-k3d/README.md) menyediakan objek yang dirender chart.
 - [Modul 2.4 — Operasi](../fase-2-kubernetes/modul-2.4-operasi-troubleshooting/README.md) menyediakan rollout, PDB, context safety, dan troubleshooting.
 - [Fase 4 — Ansible](../fase-4-ansible/README.md) menyediakan cluster readiness sebelum Helm.
-- Fase 6 akan menggunakan Helm dalam alur GitLab CI dan ArgoCD.
+- [Fase 6 — GitOps](../fase-6-gitops/README.md) menggunakan Helm dalam alur GitLab CI dan ArgoCD; runtime GitOps tetap **belum diverifikasi** tanpa execution evidence.
 - Fase 7 akan memberi telemetry dan SLO evidence untuk workload yang dikelola chart.
 
 ## Catatan SRE
