@@ -79,4 +79,4 @@ Jika cluster perlu direbuild, alur recovery adalah OpenTofu metadata → Ansible
 
 ## Kaitan
 
-Gunakan [Modul 6.1](../modul-6.1-gitlab-ci-cd/README.md), [Modul 6.2](../modul-6.2-argocd/README.md), dan telemetry dari Fase 7 Observability yang masih menyusul.
+Gunakan [Modul 6.1](../modul-6.1-gitlab-ci-cd/README.md), [Modul 6.2](../modul-6.2-argocd/README.md), dan [Fase 7 Observability](../../../../fase-7-observability/README.md).

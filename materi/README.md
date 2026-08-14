@@ -254,7 +254,59 @@ materi/
 │       └── evaluasi/
 │           ├── latihan.md
 │           └── kuis-dan-jawaban.md
-├── fase-7-observability/            ⏳ menyusul
+├── fase-7-observability/            ✅ tersedia
+│   ├── README.md
+│   ├── modul-7.1-prometheus/        ✅ tersedia
+│   │   ├── README.md
+│   │   ├── 01-arsitektur-scrape-exporter-promql.md
+│   │   ├── 02-rules-alertmanager-retention-cardinality.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-prometheus-node-blackbox-scrape.md
+│   │   │   └── LAB-02-promql-rules-alertmanager.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+│   ├── modul-7.2-alloy-telemetry-pipeline/ ✅ tersedia
+│   │   ├── README.md
+│   │   ├── 01-alloy-components-metrics-logs-traces.md
+│   │   ├── 02-otel-pipeline-daemonset-helm-debugging.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-alloy-metrics-remote-write.md
+│   │   │   └── LAB-02-alloy-logs-otlp-pipeline.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+│   ├── modul-7.3-mimir/              ✅ tersedia
+│   │   ├── README.md
+│   │   ├── 01-arsitektur-mimir-remote-write-object-storage.md
+│   │   ├── 02-retention-ha-query-recording-rules.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-mimir-remote-write-query.md
+│   │   │   └── LAB-02-mimir-retention-capacity-recovery.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+│   ├── modul-7.4-loki-tempo/          ✅ tersedia
+│   │   ├── README.md
+│   │   ├── 01-loki-labels-logql-redaction-retention.md
+│   │   ├── 02-tempo-otlp-traces-correlation.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-alloy-loki-log-pipeline.md
+│   │   │   └── LAB-02-tempo-trace-log-metrics-correlation.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+│   └── modul-7.5-grafana-alerting-slo/ ✅ tersedia
+│       ├── README.md
+│       ├── 01-grafana-use-red-dashboard-as-code.md
+│       ├── 02-alerting-contact-point-routing-notification.md
+│       ├── 03-slo-error-budget-burn-rate-runbook.md
+│       ├── lab/
+│       │   ├── LAB-01-dashboard-data-source-evidence.md
+│       │   └── LAB-02-alert-firing-notification-failure-injection.md
+│       └── evaluasi/
+│           ├── latihan.md
+│           └── kuis-dan-jawaban.md
 ├── fase-8-sre-practices/            ⏳ menyusul
 └── fase-9-capstone/                 ⏳ menyusul
 ```

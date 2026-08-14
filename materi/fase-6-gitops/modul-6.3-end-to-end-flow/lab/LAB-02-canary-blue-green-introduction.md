@@ -86,4 +86,4 @@ Canary/blue-green runtime **belum diverifikasi** tanpa evidence aktual dari roll
 
 ## Kaitan
 
-Lanjutkan ke evaluasi [Modul 6.3](../evaluasi/latihan.md) dan telemetry Fase 7 Observability yang masih menyusul.
+Lanjutkan ke evaluasi [Modul 6.3](../evaluasi/latihan.md) dan telemetry [Fase 7 Observability](../../../fase-7-observability/README.md).

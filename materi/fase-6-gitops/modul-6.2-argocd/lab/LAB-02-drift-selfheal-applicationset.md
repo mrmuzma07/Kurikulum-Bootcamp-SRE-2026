@@ -96,4 +96,4 @@ status: <verified-or-belum-diverifikasi>
 
 ## Kaitan
 
-Hubungkan hasil ke [Modul 6.3 promotion](../../modul-6.3-end-to-end-flow/README.md) dan Fase 7 Observability yang masih menyusul.
+Hubungkan hasil ke [Modul 6.3 promotion](../../modul-6.3-end-to-end-flow/README.md) dan [Fase 7 Observability](../../../fase-7-observability/README.md).
