@@ -40,6 +40,6 @@ Dashboard kosong bukan selalu backend down: cek datasource, tenant, time range, 
 
 ## Kaitan
 
-- [Fase 6 GitOps](../fase-6-gitops/README.md) menggunakan alert/SLO sebagai promotion evidence.
+- [Fase 6 GitOps](../../fase-6-gitops/README.md) menggunakan alert/SLO sebagai promotion evidence.
 - Fase 8 menggunakan notification, incident, error budget, dan runbook.
-- [Fase 5 Helm](../fase-5-helm/README.md) menyediakan chart untuk dashboard/alert provisioning.
+- [Fase 5 Helm](../../fase-5-helm/README.md) menyediakan chart untuk dashboard/alert provisioning.

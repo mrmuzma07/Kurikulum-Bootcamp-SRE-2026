@@ -38,4 +38,4 @@ Jika backend lambat, queue dapat penuh dan data drop; retry tanpa bound dapat me
 
 ## Kaitan
 
-Hubungkan ke [Mimir](../modul-7.3-mimir/README.md), [Loki + Tempo](../modul-7.4-loki-tempo/README.md), dan GitOps [Fase 6](../fase-6-gitops/README.md).
+Hubungkan ke [Mimir](../modul-7.3-mimir/README.md), [Loki + Tempo](../modul-7.4-loki-tempo/README.md), dan GitOps [Fase 6](../../fase-6-gitops/README.md).

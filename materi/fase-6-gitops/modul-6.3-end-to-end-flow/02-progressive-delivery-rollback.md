@@ -107,4 +107,4 @@ Tanpa bukti tersebut, status canary/blue-green adalah **belum diverifikasi**.
 
 ## Kaitan
 
-Praktikkan [LAB-02](lab/LAB-02-canary-blue-green-introduction.md), lalu hubungkan metrics ke [Fase 7 Observability](../../../../fase-7-observability/README.md).
+Praktikkan [LAB-02](lab/LAB-02-canary-blue-green-introduction.md), lalu hubungkan metrics ke [Fase 7 Observability](../../fase-7-observability/README.md).

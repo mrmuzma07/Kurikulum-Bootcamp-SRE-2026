@@ -32,4 +32,4 @@ Soal 1–10 masing-masing 4 poin; total 40. Lulus minimal 32 poin dan tanpa pela
 
 ## Kaitan
 
-Setelah lulus, hubungkan evidence modul ini ke alur Fase 7 dan [Fase 6 GitOps](../../fase-6-gitops/README.md). Runtime yang tidak memiliki evidence tetap **belum diverifikasi**.
+Setelah lulus, hubungkan evidence modul ini ke alur Fase 7 dan [Fase 6 GitOps](../../../fase-6-gitops/README.md). Runtime yang tidak memiliki evidence tetap **belum diverifikasi**.
