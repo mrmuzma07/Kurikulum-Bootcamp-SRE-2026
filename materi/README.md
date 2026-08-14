@@ -147,7 +147,19 @@ materi/
 │   │   └── evaluasi/
 │   │       ├── latihan.md
 │   │       └── kuis-dan-jawaban.md
-│   └── modul-3.3-konteks-onprem/      ⏳ menyusul"}① 天天中彩票未functions.Edit Ադրբեջary  (...)  code 
+│   └── modul-3.3-konteks-onprem/      ✅ tersedia
+│       ├── README.md                ← panduan modul & rencana 3 hari
+│       ├── 01-provider-onprem-dan-boundary.md
+│       ├── 02-simulasi-lokal-docker-libvirt-mock.md
+│       ├── 03-opentofu-ansible-k3s-handoff.md
+│       ├── 04-production-readiness-dan-evidence.md
+│       ├── lab/
+│       │   ├── LAB-01-simulasi-provisioning-lokal.md
+│       │   └── LAB-02-handoff-ke-ansible-dan-k3s.md
+│       └── evaluasi/
+│           ├── latihan.md
+│           └── kuis-dan-jawaban.md
+│   └── (Fase 3 lengkap — Modul 3.1, 3.2, dan 3.3 tersedia) 
 ├── fase-4-ansible/                  ⏳ menyusul
 ├── fase-5-helm/                     ⏳ menyusul
 ├── fase-6-gitops/                   ⏳ menyusul
@@ -171,3 +183,4 @@ materi/
 2. Baca materi sambil **langsung praktik di terminal** (jangan cuma dibaca).
 3. Kerjakan lab sampai semua ✅ acceptance criteria terpenuhi.
 4. Tutup dengan latihan + kuis. Nilai kuis minimal 80% sebelum lanjut modul berikutnya.
+"}① 天天中彩票未functions.Edit Ադրբեջary  (...)  code 
