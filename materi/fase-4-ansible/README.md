@@ -113,7 +113,7 @@ Jangan menjalankan mutation pada host yang tidak diketahui scope-nya. Runtime te
 - [Modul 3.3 — Konteks On-Prem & Provisioning](../fase-3-opentofu/modul-3.3-konteks-onprem/README.md) menyediakan metadata handoff dan boundary provider.
 - [Modul 2.2 — k3s Production](../fase-2-kubernetes/modul-2.2-k3s-production/README.md) menyediakan topologi, server/agent, dan quorum.
 - [Modul 2.4 — Operasi & Troubleshooting](../fase-2-kubernetes/modul-2.4-operasi-troubleshooting/README.md) menyediakan backup, drain, upgrade, context safety, dan evidence.
-- Fase 5 — Helm masih menyusul; chart mengelola aplikasi setelah host dan cluster siap.
+- [Fase 5 — Helm](../fase-5-helm/README.md) mengelola packaging, values, release, dan deployment aplikasi setelah host serta cluster siap. Chart, registry OCI, dan runtime release tetap belum diverifikasi tanpa evidence.
 
 ## Catatan SRE
 

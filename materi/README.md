@@ -196,7 +196,30 @@ materi/
 │       └── evaluasi/
 │           ├── latihan.md
 │           └── kuis-dan-jawaban.md
-├── fase-5-helm/                     ⏳ menyusul
+├── fase-5-helm/                     ✅ tersedia
+│   ├── README.md                    ← overview fase & boundary k3s → Helm → GitOps
+│   ├── modul-5.1-helm-fundamental/ ✅ tersedia
+│   │   ├── README.md
+│   │   ├── 01-struktur-chart-values-template.md
+│   │   ├── 02-render-install-upgrade-rollback.md
+│   │   ├── 03-repository-chart-oci-gitlab.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-chart-skeleton-render-lint.md
+│   │   │   └── LAB-02-release-lifecycle-values.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+│   └── modul-5.2-chart-production/ ✅ tersedia
+│       ├── README.md
+│       ├── 01-custom-chart-environment-values.md
+│       ├── 02-hooks-tests-notes-upgrade.md
+│       ├── 03-production-chart-security-reliability.md
+│       ├── lab/
+│       │   ├── LAB-01-custom-app-chart.md
+│       │   └── LAB-02-observability-oci-test-rollback.md
+│       └── evaluasi/
+│           ├── latihan.md
+│           └── kuis-dan-jawaban.md
 ├── fase-6-gitops/                   ⏳ menyusul
 ├── fase-7-observability/            ⏳ menyusul
 ├── fase-8-sre-practices/            ⏳ menyusul
