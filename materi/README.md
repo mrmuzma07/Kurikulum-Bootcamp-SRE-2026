@@ -135,7 +135,18 @@ materi/
 │   │   └── evaluasi/
 │   │       ├── latihan.md
 │   │       └── kuis-dan-jawaban.md
-│   ├── modul-3.2-modul-pola-produksi/ ⏳ menyusul
+│   ├── modul-3.2-modul-pola-produksi/ ✅ tersedia
+│   │   ├── README.md                ← panduan modul & rencana 3 hari
+│   │   ├── 01-arsitektur-modul-reusable.md
+│   │   ├── 02-environment-workspace-dan-state.md
+│   │   ├── 03-foreach-count-conditional-data-source.md
+│   │   ├── 04-secret-handling-dan-ci-plan.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-modul-reusable-web-server.md
+│   │   │   └── LAB-02-environment-promotion-dan-secret-safety.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
 │   └── modul-3.3-konteks-onprem/      ⏳ menyusul"}① 天天中彩票未functions.Edit Ադրբեջary  (...)  code 
 ├── fase-4-ansible/                  ⏳ menyusul
 ├── fase-5-helm/                     ⏳ menyusul
