@@ -12,7 +12,7 @@ Setelah mempelajari materi ini dan mempraktikkannya di terminal, kamu akan mampu
 - Memahami konsep **Port** (*Privileged Port* `< 1024` vs *Ephemeral Port*) dan alasan mengapa `127.0.0.1` berbeda dengan `0.0.0.0` di Kubernetes/VM.
 - Menjelaskan cara kerja **TLS (HTTPS)**: peran **Sertifikat**, **CA (*Certificate Authority*)**, **Private Key**, dan **SNI**.
 - Membedakan 3 pola **Terminasi TLS** (Server Langsung, Reverse Proxy/Ingress Termination, dan End-to-End / **mTLS**).
-- Memeriksa masa berlaku dan identitas sertifikat TLS menggunakan **`openssl`**.
+- Memeriksa masa berlaku dan identitas sertifikat TLS menggunakan **`openssl`**. 
 
 ---
 

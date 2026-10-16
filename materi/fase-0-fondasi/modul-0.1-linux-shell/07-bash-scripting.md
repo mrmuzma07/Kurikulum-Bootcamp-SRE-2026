@@ -25,7 +25,7 @@ Prinsip dari kurikulum ini: **No Snowflake Infrastructure** dan **kurangi toil**
 Ciri skrip operasional yang baik:
 1. **Aman gagal:** berhenti saat ada kesalahan, bukan melanjutkan dan merusak data.
 2. **Idempoten:** dijalankan 2x hasilnya sama, tidak error "already exists".
-3. **Jelas:** punya pesan `usage`, logging, dan exit code bermakna.
+3. **Jelas:** punya pesan `usage`, logging, dan exit code bermakna. 
 4. **Bersih:** tidak meninggalkan file sampah atau proses menggantung.
 
 ---

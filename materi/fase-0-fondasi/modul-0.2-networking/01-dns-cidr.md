@@ -11,7 +11,7 @@ Setelah mempelajari materi ini dan mempraktikkannya di terminal, kamu akan mampu
 - Menjelaskan alur resolusi DNS (resolver → root → TLD → authoritative) serta peran **cache dan TTL**.
 - Memakai `/etc/hosts` untuk pemetaan nama manual dan mengetahui urutan pembacaannya.
 - Membaca notasi **CIDR** (`/24`, `/26`, dll.) dan **menghitung** jumlah IP, range usable, network, dan broadcast.
-- Memilih **pool IP yang aman** (tidak bentrok) untuk MetalLB.
+- Memilih **pool IP yang aman** (tidak bentrok) untuk MetalLB. 
 
 ---
 
