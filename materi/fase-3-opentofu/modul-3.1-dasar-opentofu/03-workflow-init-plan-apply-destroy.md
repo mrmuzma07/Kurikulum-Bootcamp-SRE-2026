@@ -1,250 +1,329 @@
-# 03 — Workflow `init → plan → apply → destroy`
+# 03 — Workflow OpenTofu: Siklus Terukur `init → plan → apply → destroy`
 
-> Workflow OpenTofu yang aman memisahkan syntax check, dependency initialization, plan review, approved change, validation, dan cleanup.
+> **Ringkasan:** Di lingkungan produksi enterprise, mengeksekusi perubahan infrastruktur bukanlah tindakan coba-coba tanpa pengawasan. OpenTofu memaksakan disiplin pemisahan antara tahap perancangan (*plan*) dan tahap eksekusi (*apply*). Dokumen ini membedah siklus hidup operasional IaC standar industri, memahami kode simbol perubahan pada output `plan` (termasuk bahaya tersembunyi `-/+ replace`), mengamankan rencana eksekusi menggunakan file binary terkomit (*plan files*), melakukan verifikasi runtime pasca-apply, hingga prosedur pembongkaran aman (*graceful destroy*).
 
-## Tujuan
+---
 
-- Menjalankan workflow dasar pada project disposable.
-- Membedakan command read-only dari command yang mengubah infrastructure/state.
-- Membaca action pada plan sebelum apply.
-- Menghindari apply/destroy pada project atau context yang salah.
+## 1. Analogi Pemula: Kontraktor Membangun Gedung Bertingkat
 
-## 1. Verifikasi Tool dan Runtime
-
-Pada Mac Apple Silicon:
-
-```bash
-tofu version
-docker version
-docker context show
-docker info --format '{{.OSType}}/{{.Architecture}}'
-```
-
-Expected architecture untuk lab adalah `darwin_arm64` pada CLI dan `linux/arm64` pada runtime/container image bila native ARM dipakai. Bila hanya tersedia image `amd64`, catat penggunaan emulasi dan dampaknya; jangan menganggap hasil performa setara.
-
-Command ini read-only terhadap infrastructure. Jika `tofu` belum ada:
-
-```bash
-brew install opentofu
-```
-
-Gunakan versi package yang telah disetujui dan catat hasil `tofu version` sebagai evidence. Jangan mengunduh executable dari URL acak.
-
-## 2. Struktur Project dan `.gitignore`
+Untuk memahami alur kerja standar OpenTofu, bayangkan sebuah proyek konstruksi bangunan sipil bertaraf internasional:
 
 ```text
-lab-tofu/
-├── main.tf
-├── variables.tf
-├── outputs.tf
-├── versions.tf
-├── terraform.tfvars.example
-└── .gitignore
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 ANALOGI KONTRAKTOR BANGUNAN & WORKFLOW OPENTOFU             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  [ TAHAP 1: tofu init (PERSIAPAN LOGISTIK & ALAT BERAT) ]                  │
+│  Sebelum batu bata dipasang, mandor mendatangkan mesin molen semen, derek   │
+│  crane, dan helm proyek dari gudang pusat ke lokasi tanah (Mengunduh        │
+│  binary provider Docker/Proxmox dan mengunci hash di .terraform.lock.hcl).  │
+│                                                                             │
+│  [ TAHAP 2: tofu fmt & validate (PEMERIKSAAN KELAYAKAN TEKNIK) ]            │
+│  Insinyur teknik memeriksa lembaran kalkulasi struktur. Apakah ada rumus    │
+│  beban yang salah hitung atau garis gambar yang miring? Jika ada cacat,     │
+│  proyek ditahan sebelum semen dicor!                                        │
+│                                                                             │
+│  [ TAHAP 3: tofu plan (PRESENTASI RENCANA KERJA KE PEMILIK GEDUNG) ]        │
+│  Mandor mempresentasikan cetak biru terperinci ke pemilik gedung:           │
+│  - "Kami akan menambah 2 pilar beton baru (+)"                              │
+│  - "Kami akan mengganti warna cat dinding (~)"                              │
+│  - "Kami akan MEROBOHKAN TEMBOK LAMA lalu membangun ulang (-/+)"            │
+│  Pemilik gedung dapat meneliti dampak risiko dan biayanya sebelum setuju.   │
+│                                                                             │
+│  [ TAHAP 4: tofu apply (PELAKSANAAN KONSTRUKSI NYATA) ]                     │
+│  Setelah pemilik menandatangani persetujuan, mandor menginstruksikan kuli   │
+│  untuk mengecor beton dan memasang bata sesuai cetak biru yang disepakati.  │
+│                                                                             │
+│  [ TAHAP 5: tofu destroy (PEMBONGKARAN TERTIB PASCA SEWA) ]                 │
+│  Ketika masa sewa proyek selesai, seluruh struktur dibongkar secara rapi   │
+│  dan lahan dikembalikan ke kondisi semula tanpa merusak kavling tetangga.   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Contoh `.gitignore` minimal:
+---
 
-```gitignore
-.terraform/
-*.tfstate
-*.tfstate.*
-*.tfvars
-*.tfplan
-crash.log
-crash.*.log
-```
+## 2. Klasifikasi Perintah: Memahami Profil Risiko Operasi
 
-`.gitignore` mengurangi risiko commit tidak sengaja, tetapi bukan secret manager. State tetap harus diproteksi melalui permission, backend policy, encryption, dan access control.
-
-## 3. `tofu init`
-
-```bash
-tofu init
-```
-
-`init` mengunduh provider/module, membuat direktori `.terraform`, dan membaca backend. Periksa provider source, version, lock file, serta backend yang digunakan sebelum lanjut.
-
-Jika project berpindah backend atau directory state, `init` dapat meminta migrasi. Hentikan dan review backup/scope sebelum menjawab prompt migrasi. Jangan memakai `-reconfigure` untuk mengabaikan warning tanpa memahami konsekuensi; jangan memakai `-migrate-state` pada state penting tanpa approval dan backup.
-
-## 4. `tofu fmt` dan `tofu validate`
-
-```bash
-tofu fmt -check
-tofu fmt -diff
-tofu validate
-```
-
-- `fmt -check` mendeteksi file yang belum terformat.
-- `fmt -diff` membantu review perubahan format.
-- `validate` memeriksa sintaks dan konsistensi internal module; ia tidak membuktikan provider API atau runtime sehat.
-
-Jika format belum sesuai, jalankan `tofu fmt` pada project lab lalu review diff Git. Jangan menjalankan formatter pada directory production yang tidak sedang direview.
-
-## 5. `tofu plan`
-
-```bash
-tofu plan -out=lab.tfplan
-```
-
-Plan membaca configuration, state, dan provider refresh lalu menampilkan action:
+Sebagai calon engineer SRE profesional, Anda wajib mengetahui tingkat risiko dari setiap perintah yang Anda ketikkan di terminal:
 
 ```text
-+ create
-~ update in-place
--/+ replace
-- destroy
+┌─────────────────────┬────────────────────────────────────┬──────────────────────────────────┐
+│ Kategori Perintah   │ Contoh Perintah                    │ Karakteristik & Tingkat Risiko   │
+├─────────────────────┼────────────────────────────────────┼──────────────────────────────────┤
+│ **Read-Only**       │ `tofu fmt -check`                  │ **Aman (Zero Risk).**            │
+│ (Hanya Membaca)     │ `tofu validate`                    │ Hanya membaca sintaks lokal atau │
+│                     │ `tofu plan`                        │ status infrastruktur tanpa       │
+│                     │ `tofu state list`                  │ mengubah sistem fisik sedikit pun│
+├─────────────────────┼────────────────────────────────────┼──────────────────────────────────┤
+│ **State Mutation**  │ `tofu import`                      │ **Risiko Sedang-Tinggi.**        │
+│ (Mengubah Rekaman)  │ `tofu state mv`                    │ Memodifikasi file state pemetaan.│
+│                     │ `tofu state rm`                    │ Berpotensi memutus kepemilikan   │
+│                     │ `tofu init -migrate-state`         │ objek tanpa menyentuh server riil│
+├─────────────────────┼────────────────────────────────────┼──────────────────────────────────┤
+│ **Infra Mutation**  │ `tofu apply`                       │ **Kritis (Tinggi).**             │
+│ (Mengubah Fisik)    │ `tofu destroy`                     │ Memanggil API provider untuk     │
+│                     │                                    │ MEMBUAT, MENGUBAH, atau MEMBUNUH │
+│                     │                                    │ mesin/kontainer di dunia nyata!  │
+└─────────────────────┴────────────────────────────────────┴──────────────────────────────────┘
 ```
 
-Review minimal:
+---
 
-- workspace/backend dan project yang benar;
-- resource address dan jumlah perubahan;
-- perubahan `destroy` atau `replace`;
-- port, network, volume, dan image tag;
-- output yang mungkin memuat value sensitif;
-- dependency dan blast radius;
-- hasil dibandingkan change ticket/acceptance criteria.
+## 3. Tahap 1: `tofu init` (Inisialisasi Lingkungan Proyek)
 
-Plan binary dapat mengandung data sensitif dari state. Simpan hanya di directory lab yang di-ignore dan hapus sesuai retention policy. Jangan mengunggah `lab.tfplan` ke issue publik.
-
-Untuk menghasilkan plan tanpa membuat file binary:
+Setiap kali Anda membuat proyek baru, mengklon repositori Git dari tim lain, atau menambahkan blok `provider` baru di HCL, perintah pertama yang **wajib** dijalankan adalah:
 
 ```bash
-tofu plan
+$ tofu init
 ```
-
-Jangan menjadikan `plan` sebagai formal approval otomatis. Approval datang dari reviewer yang memahami action dan scope.
-
-## 6. `tofu apply`
-
-Default yang aman adalah menerapkan plan setelah review:
-
-```bash
-tofu apply lab.tfplan
-```
-
-Atau:
-
-```bash
-tofu apply
-```
-
-Command kedua menyusun ulang plan dan meminta konfirmasi. Pada production, gunakan process approval dan policy yang berlaku. Jangan menjadikan `-auto-approve` default.
-
-Untuk lab disposable, `-auto-approve` hanya boleh dipakai jika dokumentasi secara eksplisit membatasi project, resource, identity, network, stop condition, dan cleanup. Contoh tidak diberikan sebagai command copy-paste agar peserta tidak menganggapnya sebagai normal workflow.
-
-Jika apply berhenti di tengah jalan, jangan langsung mengulang atau menghapus state. Baca error provider, periksa object aktual dan state, lalu jalankan plan baru setelah penyebab dipahami.
-
-## 7. Output dan Validasi Setelah Apply
-
-```bash
-tofu output
-tofu output -json
-tofu state list
-tofu state show docker_container.web
-```
-
-`tofu output -json` dapat menampilkan value yang tidak terlihat pada output biasa; redirect hanya ke lokasi lokal yang aman dan jangan commit. Untuk output sensitive, `<sensitive>` adalah perlindungan presentasi, bukan enkripsi state.
-
-Validasi runtime lab:
-
-```bash
-docker ps --filter name=sre-tofu-web
-curl --fail --silent --show-error http://127.0.0.1:<port>
-```
-
-Ganti `<port>` dengan variable lab yang disetujui. `curl` hanya membuktikan HTTP path lokal, bukan health semua dependency.
-
-## 8. Refresh dan Reconcile
-
-Perubahan manual pada provider dapat ditemukan pada plan berikutnya:
-
-```bash
-tofu plan
-```
-
-Pada versi OpenTofu yang dipakai, jangan mengandalkan command lama yang mengubah state tanpa perubahan infrastructure. Perlakukan refresh/reconcile sebagai aktivitas yang perlu dipahami dari output versi CLI. Plan normal adalah titik awal review drift.
-
-## 9. Variable File
-
-Gunakan file var non-secret:
-
-```bash
-tofu plan -var-file=lab.auto.tfvars
-```
-
-Pastikan `lab.auto.tfvars` berada di `.gitignore` bila berisi nilai lokal atau data sensitif. Untuk parameter non-secret sederhana:
-
-```bash
-tofu plan -var='host_port=18080'
-```
-
-Jangan memasukkan password/token ke argumen command line. Gunakan environment variable atau secret manager sesuai kebijakan organisasi. Ingat bahwa `TF_VAR_*` dapat terlihat dalam environment process dan harus memiliki permission yang sesuai.
-
-## 10. `tofu destroy` yang Terbatas
-
-Destroy adalah command berisiko karena menghapus object yang dikelola state:
-
-```bash
-tofu plan -destroy -out=destroy.tfplan
-tofu apply destroy.tfplan
-```
-
-Sebelum plan destroy:
 
 ```text
-[ ] directory project lab sudah diverifikasi
-[ ] backend/workspace sudah diverifikasi
-[ ] current owner dan resource address sudah dicatat
-[ ] tidak ada production credential/provider alias
-[ ] data yang dibutuhkan sudah dibackup
-[ ] scope destroy hanya resource disposable
-[ ] reviewer menyetujui plan
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       APA YANG DILAKUKAN TOFU INIT?                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 1. Memeriksa blok backend state (apakah local disk atau remote S3 MinIO).    │
+│ 2. Membaca versions.tf, lalu mengunduh plugin binary provider yang cocok    │
+│    dengan OS Anda (misal darwin_arm64) ke direktori rahasia .terraform/     │
+│ 3. Memverifikasi atau membuat file gembok .terraform.lock.hcl.              │
+│ 4. Menyiapkan modul-modul eksternal (jika ada).                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-`tofu destroy` tanpa target dapat menghapus seluruh resource dalam state. Jangan memberikan `-target` sebagai jalan pintas untuk cleanup tanpa memahami dependency; target juga dapat menghasilkan state parsial. Bila harus melakukan targeted destroy pada lab, tulis alasan dan verifikasi plan sebelum apply.
+### Opsi Parameter Krusial pada `tofu init`:
+* `tofu init -upgrade`: Memperbarui versi plugin provider yang terpasang ke versi rilis terbaru yang masih diizinkan oleh batasan `version` di HCL, sekaligus memperbarui checksum hash di `.terraform.lock.hcl`.
+* `tofu init -reconfigure`: Mengabaikan konfigurasi backend lama yang tersimpan di cache dan menginisialisasi backend baru dari nol.
+* `tofu init -migrate-state`: Menyalin seluruh riwayat data state dari backend lama ke backend baru (misal migrasi dari laptop lokal ke remote MinIO S3).
 
-## 11. Kategori Command
+---
 
-| Kategori | Contoh | Risiko |
+## 4. Tahap 2: `tofu fmt` & `tofu validate` (Pemeriksaan Kualitas Statis)
+
+Sebelum mengajukan perubahan ke tim Anda (*Code Review*), lakukan dua tahap audit statis lokal:
+
+### 1. Merapikan Format Kode (`tofu fmt`)
+OpenTofu memiliki standar gaya penulisan kode resmi. Jangan biarkan spasi atau indentasi yang berantakan masuk ke Git:
+
+```bash
+# Merapikan seluruh file .tf di direktori saat ini secara otomatis
+$ tofu fmt
+
+# Di pipeline CI/CD: Memeriksa apakah ada file yang tidak rapi tanpa mengubahnya
+$ tofu fmt -check -diff
+```
+
+### 2. Memvalidasi Logika Sintaksis (`tofu validate`)
+Perintah ini memverifikasi kebenaran sintaksis HCL, kecocokan tipe data variabel, dan ketersediaan atribut yang dideklarasikan:
+
+```bash
+$ tofu validate
+Success! The configuration is valid.
+```
+
+> [!NOTE]
+> **Batasan `tofu validate`:**
+> Perintah `tofu validate` bersifat **offline dan lokal**. Ia hanya memastikan bahwa kode HCL Anda tidak memiliki kesalahan ketik (*syntax error*). Ia **tidak memeriksa** apakah Docker socket Anda menyala, apakah port 8080 di laptop Anda sedang bentrok, atau apakah password Anda benar.
+
+---
+
+## 5. Tahap 3: `tofu plan` (Pemeriksaan Rencana Perubahan)
+
+`tofu plan` adalah fitur keselamatan paling penting di OpenTofu. Perintah ini membaca kondisi nyata saat ini, membandingkannya dengan kode HCL Anda, lalu menghitung selisih tindakan (*delta/diff*) yang harus dilakukan:
+
+```bash
+$ tofu plan
+```
+
+```text
+OpenTofu will perform the following actions:
+
+  # docker_image.nginx_image will be created
+  + resource "docker_image" "nginx_image" {
+      + id           = (known after apply)
+      + image_id     = (known after apply)
+      + keep_locally = true
+      + name         = "nginx:1.27.4-alpine"
+    }
+
+  # docker_container.web_app will be created
+  + resource "docker_container" "web_app" {
+      + id           = (known after apply)
+      + image        = (known after apply)
+      + name         = "sre-lab-web"
+      + ports {
+          + external = 18080
+          + internal = 80
+        }
+    }
+
+Plan: 2 to add, 0 to change, 0 to destroy.
+```
+
+### Membedah 4 Simbol Sakral Aksi Eksekusi
+
+| Simbol Tindakan | Arti & Karakteristik | Tingkat Risiko SRE |
 |---|---|---|
-| Read-only/low risk | `fmt -check`, `validate`, `plan`, `state list/show`, `graph` | Membaca config/state/provider; output dapat sensitif |
-| State mutation | `state mv`, `state rm`, `import`, backend migration | Dapat membuat state tidak konsisten atau kehilangan ownership |
-| Infrastructure mutation | `apply`, `destroy` | Membuat, mengubah, atau menghapus object provider |
+| **`+ create`** | Objek baru akan dibuat dari nol. Objek ini belum pernah ada sebelumnya. | **Rendah (Aman).** Tidak ada objek yang dimatikan. |
+| **`~ update in-place`** | Objek yang ada akan dimodifikasi atributnya tanpa harus mematikan atau menghapus objek fisik (misalnya mengubah tag label atau metadata). | **Rendah-Sedang.** Layanan tetap berjalan tanpa restart. |
+| **`-/+ replace`** | **BAHAYA MAKSIMUM!** Objek lama akan **DIHANCURKAN DAN DIMUSNAHKAN DAHULU (`-`)**, baru kemudian objek baru dengan nama yang sama dibuat ulang (`+`). | **KRITIS! Pemicu Utama Downtime & Data Loss!** |
+| **`- destroy`** | Objek fisik yang ada saat ini akan dihapus permanen dari dunia nyata karena kodenya dihapus dari file HCL. | **Tinggi.** Pastikan resource memang sudah tidak dipakai. |
 
-## Acceptance Checklist
+> [!CAUTION]
+> **Bahaya Laten Simbol `-/+ replace`:**
+> Mengapa sebuah resource di-*replace* dan tidak di-*update in-place*? Karena API provider tidak mengizinkan perubahan atribut tersebut saat objek sedang hidup (disebut atribut `ForceNew`).
+> *Contoh:* Mengubah subnet pada kartu jaringan VM, atau mengubah parameter `name` pada kontainer Docker. Jika kontainer tersebut menyimpan data di disk lokal dan di-*replace*, **seluruh data di dalamnya akan musnah seketika!** Selalu teliti simbol `-/+` sebelum menyetujui perubahan.
 
-- [ ] `tofu fmt -check` dan `tofu validate` berhasil pada project lab atau kegagalan dicatat.
-- [ ] Plan dibaca per resource address dan action.
-- [ ] Apply hanya dilakukan setelah scope/backend diverifikasi.
-- [ ] HTTP dan state diverifikasi setelah perubahan.
-- [ ] Destroy menggunakan plan terpisah dan hanya project lab.
-- [ ] Tidak ada plan binary, tfvars, state, atau credential masuk Git.
+---
 
-## Troubleshooting
+### Praktik Terbaik SRE: Mengunci Perubahan dengan Binary Plan File (`-out`)
 
-### `Backend initialization required`
+Di lingkungan produksi modern, mengeksekusi `tofu apply` secara polos tanpa file plan adalah risiko keamanan (*Time-of-Check to Time-of-Use / TOCTOU Race Condition*).
 
-Jalankan `tofu init` dari directory root yang benar. Periksa backend block dan jangan memindahkan state manual dengan copy file tanpa prosedur migrasi.
+Mengapa? Karena antara waktu Anda membaca output `tofu plan` di layar dengan waktu Anda mengetikkan `yes`, kondisi infrastruktur di cloud/server bisa saja berubah diubah orang lain!
 
-### Plan meminta `-/+ replace`
+```bash
+# 1. Simpan rencana eksekusi matematis ke dalam file binary terenkripsi
+$ tofu plan -out=tfplan
 
-Baca atribut yang berubah, lifecycle provider, dan dependency. Replacement berarti object lama dihapus/dibuat ulang; review downtime dan data loss sebelum apply.
+# 2. Terapkan TEPAT rencana yang ada di dalam file tersebut tanpa rekalkulasi ulang!
+$ tofu apply tfplan
+```
 
-### Apply gagal karena nama/port sudah ada
+Dengan alur ini, OpenTofu dijamin **hanya akan mengeksekusi apa yang tercatat di dalam file `tfplan`**. Jika ada perubahan infrastruktur tak terduga saat plan dieksekusi, OpenTofu akan otomatis membatalkan eksekusi demi keamanan (*fail-safe*).
 
-Identifikasi owner object. Jangan menghapus object manual yang tidak dibuat lab. Ubah nama/port lab atau lakukan import jika object memang sengaja diadopsi dan ownership disetujui.
+---
 
-### `tofu destroy` melihat lebih banyak resource dari dugaan
+## 6. Tahap 4: `tofu apply` (Penerapan Perubahan Nyata)
 
-Berhenti. Periksa backend, workspace, state list, module directory, dan plan destroy. Jangan meneruskan hanya karena prompt konfirmasi muncul.
+Setelah rencana ditinjau dan disetujui, terapkan perubahan ke infrastruktur:
 
-## Catatan SRE
+```bash
+$ tofu apply tfplan
+docker_image.nginx_image: Creating...
+docker_image.nginx_image: Creation complete after 3s [id=sha256:...]
+docker_container.web_app: Creating...
+docker_container.web_app: Creation complete after 1s [id=7a8b9c0d...]
 
-Workflow yang benar bukan berarti selalu apply. Keputusan terbaik dapat berupa tidak melakukan perubahan setelah plan menunjukkan blast radius lebih besar dari manfaatnya.
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
 
-## Kaitan dengan Modul Berikutnya
+Outputs:
 
-- [04 — State, Remote, Import, Drift](04-state-remote-import-drift.md) menjelaskan lifecycle state dan operasi adopsi resource.
-- [LAB-01 Docker Web Server](lab/LAB-01-tofu-docker-web-server.md) mempraktikkan workflow ini.
-- [LAB-02 MinIO, Import & Drift](lab/LAB-02-state-minio-import-drift.md) menambahkan backend remote dan concurrency.
+application_url = "http://127.0.0.1:18080"
+container_id = "7a8b9c0d1e2f3a4b..."
+```
+
+> [!WARNING]
+> **Larangan Penggunaan Flag `-auto-approve` di Produksi:**
+> Perintah `tofu apply -auto-approve` melewati tahap konfirmasi manusia dan langsung mengeksekusi perubahan. Perintah ini **DILARANG KERAS** digunakan di terminal manual laptop Anda! Satu kesalahan ketik dapat memusnahkan database produksi tanpa peringatan. Flag ini hanya boleh digunakan di dalam pipeline CI/CD yang telah memiliki proteksi *approval gate*.
+
+---
+
+## 7. Tahap 5: Pasca-Apply (Inspeksi & Smoke Testing)
+
+Sebagai SRE, tugas Anda belum selesai saat `tofu apply` menampilkan kata *complete*. Anda harus memvalidasi kesehatan runtime aplikasi secara independen:
+
+```bash
+# 1. Memeriksa daftar resource yang resmi tercatat di dalam state
+$ tofu state list
+docker_container.web_app
+docker_image.nginx_image
+
+# 2. Memeriksa detail atribut kontainer yang baru lahir
+$ tofu state show docker_container.web_app
+# docker_container.web_app:
+resource "docker_container" "web_app" {
+    id                   = "7a8b9c0d1e2f..."
+    image                = "sha256:d6b69..."
+    name                 = "sre-lab-web"
+    ports {
+        external = 18080
+        internal = 80
+        ip       = "0.0.0.0"
+        protocol = "tcp"
+    }
+}
+
+# 3. Validasi fisik di runtime Docker host (OrbStack Mac)
+$ docker ps --filter "name=sre-lab-web"
+CONTAINER ID   IMAGE          COMMAND                  CREATED         STATUS         PORTS                   NAMES
+7a8b9c0d1e2f   nginx:alpine   "/docker-entrypoint.…"   2 minutes ago   Up 2 minutes   0.0.0.0:18080->80/tcp   sre-lab-web
+
+# 4. Validasi respon HTTP aplikasi (Smoke Test Layer 7)
+$ curl -sI http://127.0.0.1:18080
+HTTP/1.1 200 OK
+Server: nginx/1.27.4
+Date: Sat, 17 Oct 2026 07:15:20 GMT
+Content-Type: text/html
+Content-Length: 615
+```
+
+---
+
+## 8. Tahap 6: `tofu destroy` yang Terukur & Aman
+
+Ketika sebuah lingkungan lab atau staging sementara sudah selesai digunakan, kita wajib membersihkan sumber daya tersebut agar tidak membuang kuota komputasi dan memori:
+
+```bash
+# LANGKAH AMAN: Selalu buat plan penghancuran terlebih dahulu!
+$ tofu plan -destroy -out=destroy.tfplan
+Plan: 0 to add, 0 to change, 2 to destroy.
+
+# Terapkan penghancuran setelah diverifikasi
+$ tofu apply destroy.tfplan
+docker_container.web_app: Destroying... [id=7a8b9c0d...]
+docker_container.web_app: Destruction complete after 1s
+docker_image.nginx_image: Destruction complete after 0s
+
+Destroy complete! Resources: 2 destroyed.
+```
+
+### Checklist Keamanan Sebelum Menjalankan Destroy:
+- [ ] Konteks direktori dan branch Git sudah benar (Pastikan Anda TIDAK berada di direktori `production`!).
+- [ ] Backend state yang aktif diverifikasi menunjuk ke environment lab non-kritis.
+- [ ] Seluruh data penting yang ada di volume telah dibackup ke lokasi terpisah.
+- [ ] Tidak ada aplikasi lain yang bergantung pada network atau resource yang akan dimusnahkan.
+
+---
+
+## 9. Matriks Pemecahan Masalah (Troubleshooting) Workflow
+
+| Gejala Masalah | Titik Investigasi | Penyebab Akar (*Root Cause*) | Langkah Solusi SRE |
+|---|---|---|---|
+| `Error: Backend initialization required` | `tofu plan` | Anda baru saja menambahkan blok backend atau mengganti provider, tetapi belum menjalankan inisialisasi. | Jalankan `tofu init` di direktori proyek tersebut. |
+| `Error: Failed to lock state (Lock Info: ...)` | `tofu apply` | Ada proses OpenTofu lain yang sedang berjalan bersamaan, atau proses apply sebelumnya terputus paksa. | Periksa apakah ada engineer lain yang sedang bekerja; jika proses lama sudah mati, gunakan `tofu force-unlock <LOCK-ID>`. |
+| `Apply gagal di tengah jalan (Partial Apply)` | Terminal error saat apply | Sebagian resource berhasil dibuat (misal image berhasil), namun kontainer gagal karena port bentrok. | Jangan hapus state! Perbaiki masalah port di HCL, lalu jalankan `tofu apply` ulang untuk melanjutkan rekonsiliasi. |
+| `tofu destroy` mencoba menghapus objek yang tidak diinginkan | `tofu plan -destroy` | Ada referensi resource di HCL yang tidak sengaja mencakup modul shared atau resource bersama. | Hentikan proses! Periksa kembali batasan deklarasi resource dan file state. |
+
+---
+
+## 10. Ringkasan Praktis & Cheatsheet Workflow
+
+```bash
+# 1. Alur standar harian pengembangan IaC
+tofu fmt                          # 1. Rapikan format
+tofu validate                     # 2. Cek sintaks
+tofu plan -out=tfplan             # 3. Hitung selisih perubahan & simpan plan
+tofu apply tfplan                 # 4. Terapkan rencana yang sudah disetujui
+
+# 2. Inspeksi cepat pasca apply
+tofu output                       # Tampilkan data output
+tofu state list                   # Tampilkan daftar resource yang dikelola
+
+# 3. Pembongkaran aman
+tofu plan -destroy -out=del.tfplan
+tofu apply del.tfplan
+```
+
+---
+
+## 11. Cek Pemahaman Mandiri
+
+1. Mengapa seorang SRE sangat disarankan menyimpan hasil rencana ke dalam file binary (`tofu plan -out=tfplan`) sebelum mengeksekusi `tofu apply`, dibandingkan langsung menjalankan `tofu apply` tanpa argumen?
+2. Jelaskan perbedaan dampak operasional antara simbol perubahan `~ update in-place` dengan simbol `-/+ replace` pada output `tofu plan`! Mengapa simbol `-/+` harus dicermati secara kritis?
+3. Apa saja yang dilakukan oleh OpenTofu saat perintah `tofu init` dijalankan di sebuah direktori baru? Mengapa direktori `.terraform/` tidak boleh di-commit ke repositori Git?
+4. Apa yang dimaksud dengan *Partial Apply Failure*? Jika dari 5 resource hanya 3 yang berhasil dibuat dan 2 gagal, apa yang terjadi pada file `terraform.tfstate`?
+5. Mengapa parameter `-auto-approve` dianggap sebagai anti-pattern jika dieksekusi secara manual oleh operator di terminal lingkungan produksi?
+
+---
+
+*Langkah Selanjutnya:* Masuk ke [04 — State, Remote, Import, Drift](file:///Users/muzma/Developer/repos/it-oss/training/BootcampSRE/materi/fase-3-opentofu/modul-3.1-dasar-opentofu/04-state-remote-import-drift.md) untuk mempelajari manajemen state tingkat lanjut, konfigurasi remote backend MinIO S3, mekanisme locking, teknik adopsi infrastruktur via `tofu import`, dan penanganan *configuration drift*.
