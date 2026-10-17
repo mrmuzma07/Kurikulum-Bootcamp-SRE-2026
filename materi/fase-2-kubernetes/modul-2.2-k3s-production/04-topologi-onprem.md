@@ -1,207 +1,300 @@
-# 04 — Topologi On-Prem di OrbStack
+# 04 — Perancangan Topologi Jaringan On-Premises di OrbStack
 
-> Merancang jaringan "mirip server sungguhan" di Mac: static IP, jalur akses dari luar, dan posisi LoadBalancer eksternal — semua sebagai simulasi sebelum MetalLB (Modul 2.3).
+> **Ringkasan:** Membangun pola pikir arsitek infrastruktur on-premises: beralih dari kemanjaan otomatisasi cloud menuju realitas data center mandiri, merancang arsitektur **4 Lapisan Akses Jaringan**, memahami pembagian alokasi **Subnet IP** agar terbebas dari bencana tabrakan IP (*IP Collision*), menelusuri aliran paket data dari peramban laptop menuju Pod (*End-to-End Packet Flow*), serta menyusun dokumen cetak biru topologi resmi sebagai fondasi otomasi **Ansible** di Fase 4.
 
-## Tujuan
-- Bisa merancang topologi on-prem (control plane, worker, akses eksternal) di OrbStack
-- Paham static IP vs DHCP & kenapa IP stabil penting untuk K8s on-prem
-- Mengerti posisi external LoadBalancer & ingress dalam topologi
-- Bisa menjelaskan jalur traffic: Mac → LB → ingress → Service → Pod
-- Bisa membandingkan topologi cloud (auto-LB) vs on-prem (self-hosted LB)
+---
 
-## 1. Kenapa Topologi Penting?
+## Tujuan Pembelajaran
+Setelah mempelajari materi ini dan menyelesaikan praktiknya di terminal, kamu akan mampu:
+- Menjelaskan perbedaan mendasar pola pikir arsitektur jaringan antara **Cloud Terkelola (AWS EKS/GCP GKE)** vs **On-Premises Bare-Metal**.
+- Menjelaskan mengapa alamat IP dinamis (DHCP tanpa reservasi) adalah musuh utama stabilitas cluster Kubernetes dan bagaimana **IP Statis** diimplementasikan di dunia nyata.
+- Merancang dan memetakan arsitektur **4 Lapisan Akses Jaringan** (*External Client*, *Load Balancer VIP*, *Ingress Controller*, dan *Internal Cluster Service*).
+- Membuat perencanaan pembagian rentang IP (*Subnet IP Planning*) yang memisahkan antara IP Node, IP Pod Overlay, IP ClusterIP, dan Pool Alamat MetalLB.
+- Menelusuri perjalanan paket data langkah demi langkah dari saat pengguna mengetik URL di peramban hingga dijawab oleh Pod aplikasi.
+- Menyusun dokumen spesifikasi topologi resmi (**`topologi.md`**) yang siap dikonversi menjadi file *inventory* otomasi Ansible di Fase 4.
 
-Di cloud, detail jaringan "tersembunyi": Service `type=LoadBalancer` otomatis dapat IP publik dari cloud provider, DNS otomatis, node di VPC. Di **on-prem**, Anda **menjadi** network engineer: atur IP, pilih range LoadBalancer, konfigurasi firewall, dan pasang LB sendiri. Bootcamp ini menyimulasikannya di OrbStack — VM dengan IP stabil berperan sebagai server di datacenter.
+---
 
-Paham topologi = paham kenapa Modul 2.3 (MetalLB) perlu, kenapa static IP penting (Ansible inventory — Fase 4), dan kenapa ingress diletakkan di depan.
+## 1. Konsep Dasar: Menjadi Insinyur Jaringan di Lingkungan On-Premises
 
-## 2. IP Stabil — Fondasi On-Prem
+### Kemanjaan Cloud Publik vs Realitas Data Center Mandiri
+Jika kamu mendeploy aplikasi ke layanan cloud terkelola seperti **Amazon EKS** atau **Google GKE**, kamu dimanjakan oleh otomatisasi penuh penyedia cloud:
+- Ingin Load Balancer publik? Cukup tulis `type: LoadBalancer`, dalam 1 menit AWS otomatis membuatkan perangkat keras *Elastic Load Balancing (ELB)* dengan Alamat IP Publik.
+- Ingin nama domain otomatis? AWS Route53 langsung menyambungkannya.
+- Ingin harddisk persisten? AWS EBS langsung mencantolkannya secara otomatis.
 
-**DHCP** (IP berubah) = musuh K8s on-prem. Control plane, etcd peer, Ansible target — semua butuh **IP stabil**. OrbStack Machine punya IP stabil (Modul 1.2), mensimulasikan static IP.
+**Namun di lingkungan On-Premises (Private Data Center, Pabrik, Perbankan, atau Bare-Metal):**
+**TIDAK ADA TOMBOL AJAIB DARI CLOUD PROVIDER!**
+Di lingkungan on-prem, **KITA ADALAH PENYEDIA INFRASTRUKTURNYA (*You Are The Cloud Provider*)**:
+1. Kita yang menarik kabel LAN fisik dan mengonfigurasi VLAN di switch data center.
+2. Kita yang membagi jatah subnet Alamat IP agar tidak terjadi tabrakan (*collision*).
+3. Kita yang wajib menyediakan dan memasang sistem Load Balancer bare-metal sendiri (**MetalLB di Modul 2.3**).
+4. Kita yang menyetel server DNS lokal dan sistem penyimpanan bersama (*Shared Storage*).
 
-```bash
-# IP OrbStack Machine tidak berubah saat stop/start (bukan DHCP)
-orb ip k3s-cp1
-orb stop k3s-cp1 && orb start k3s-cp1 && orb ip k3s-cp1   # IP sama
+```text
+ PERBANDINGAN PERAN INFRASTRUKTUR:
+ ┌──────────────────────────┐         ┌──────────────────────────┐
+ │     CLOUD PUBLIK         │         │   ON-PREMISES BARE-METAL │
+ ├──────────────────────────┤         ├──────────────────────────┤
+ │ Load Balancer : AWS ELB  │ ◄──VS──►│ Load Balancer : MetalLB  │
+ │ DNS Publik    : Route 53 │         │ DNS Lokal     : CoreDNS  │
+ │ IP Publik     : Otomatis │         │ IP Statis     : Netplan  │
+ │ Storage Cloud : AWS EBS  │         │ Storage Lokal : Longhorn │
+ └──────────────────────────┘         └──────────────────────────┘
 ```
 
-**Di production nyata** (server fisik/Proxmox): set static IP via netplan/networkd, atau DHCP reservation (IP-MAC binding). OrbStack abstraksi ini — kita anggap IP stabil = static.
+> 🏢 **Peran OrbStack sebagai "Mini Data Center":**
+> Di Bootcamp SRE 2026 ini, kita tidak menggunakan AWS yang mahal dan mengaburkan pemahaman fundamental jaringan. Kita menyimulasikan seluruh rak server data center tersebut di atas laptop MacBook menggunakan **OrbStack Linux Machines**:
+> - Setiap mesin virtual (VM) bertindak layaknya satu rak server fisik (*bare-metal rack*).
+> - Jaringan bridge virtual OrbStack bertindak layaknya switch jaringan fisik di data center.
+> - Alamat IP stabil OrbStack (`198.19.249.x`) menjadi simulasi dari Alamat IP Statis kabel LAN data center!
 
-```
- Sumber IP on-prem (urut dari "paling produksi"):
- 1. Static manual di /etc/netplan/        (server fisik)
- 2. DHCP reservation (IP-MAC binding)    (VM di Proxmox/VMware)
- 3. OrbStack Machine IP stabil           (lab bootcamp — simulasi static)
-```
+---
 
-## 3. Topologi Lab — Jaringan "Datacenter Mini"
+## 2. Musuh Terbesar Kubernetes On-Prem: Alamat IP yang Berubah-ubah!
 
-```
- ┌──────────────────── Mac (host) ─────────────────────────┐
- │                                                          │
- │   Browser/curl dari Mac                                   │
- │        │                                                  │
- │        │  (1) akses via MetalLB IP (Modul 2.3)            │
- │        │      atau NodePort sementara                      │
- │        ▼                                                  │
- │   ┌─────────────┐   LoadBalancer (MetalLB L2, Modul 2.3)  │
- │   │  LB / VIP   │   IP dari pool (mis. 192.168.97.200)    │
- │   └──────┬──────┘                                         │
- │          │  (2) route ke ingress controller Pod           │
- │          ▼                                                  │
- │   ┌─────────────┐   Ingress (Traefik/nginx)               │
- │   │  Ingress    │   host/path routing                      │
- │   └──────┬──────┘                                         │
- │          │  (3) backend Service                            │
- │          ▼                                                  │
- │   ┌──────┴──────┬────────────┐                              │
- │   │  Service A  │  Service B │   (ClusterIP, internal)     │
- │   └──────┬──────┴──────┬─────┘                              │
- │          │              │                                  │
- │          ▼              ▼                                  │
- │   ┌──────────────────────────┐   Pod (di worker node)     │
- │   │  k3s cluster (3cp + 2w)  │                            │
- │   │  192.168.97.10–14 (VM)   │                            │
- │   └──────────────────────────┘                            │
- │                                                          │
- └──────────────────────────────────────────────────────────┘
-```
+Salah satu penyebab paling sering hancurnya cluster Kubernetes on-premise milik pemula adalah membiarkan server menggunakan **DHCP Biasa Tanpa Reservasi**.
 
-Empat lapisan akses (penting dihafal):
-1. **External entry** — Mac client → LB (MetalLB IP atau NodePort sementara)
-2. **LoadBalancer** — distributes traffic, beri IP eksternal (Modul 2.3)
-3. **Ingress** — HTTP layer 7, route via host/path ke Service
-4. **Service** — layer 4, route ke Pod via label selector
+### Mengapa IP yang Berganti Berakibat Fatal bagi Kubernetes?
+1. **Sertifikat TLS API Server Terkunci pada IP:** Saat k3s diinstal, sertifikat enkripsi SSL dibuat khusus untuk mengikat Alamat IP server master saat itu (melalui `--tls-san`). Jika besok pagi router memberikan IP baru ke server master, sertifikat akan ditolak dan `kubectl` tidak bisa terhubung!
+2. **Sinkronisasi etcd Peer Terputus:** Anggota database `etcd` saling memanggil menggunakan Alamat IP server. Jika IP server 2 berganti, server 1 dan server 3 mengira server 2 mati, sehingga kuorum terancam pecah!
+3. **Otomasi Ansible Lumpuh:** File inventaris server yang dicatat oleh tim SRE menjadi tidak valid karena alamat targetnya salah sasaran.
 
-## 4. Range IP & Mencegah Bentrok
+### Tiga Cara Menetapkan IP Statis di Dunia Nyata:
+1. **Static IP Manual via Netplan (Server Fisik / Bare-Metal):** Mengedit file `/etc/netplan/01-netcfg.yaml` di Ubuntu dan mengunci IP secara permanen.
+2. **DHCP Reservation / Static Lease (VM di Proxmox/VMware):** Mengunci alamat IP pada router switch berdasarkan *MAC Address* kartu jaringan server.
+3. **OrbStack Machine (Simulasi Lab Kita):** OrbStack secara otomatis memberikan IP privat yang stabil dan tidak berubah meskipun mesin di-stop, di-start, atau laptop di-reboot.
 
-Pilih range IP LoadBalancer (pool MetalLB) yang **tidak dipakai DHCP/static lain**. Di OrbStack, VM dapat IP di subnet OrbStack (mis. `192.168.97.0/24`).
+---
 
-```bash
-# Cek range OrbStack
-orb ip k3s-cp1                      # mis. 192.168.97.10
-# Pool MetalLB (Modul 2.3) pilih range yang tidak dipakai VM, mis.:
-#   192.168.97.200–192.168.97.250   (asumsi VM di .10–.30)
+## 3. Arsitektur 4 Lapisan Akses Jaringan (The 4 Access Layers)
+
+Ketika seorang pengguna di luar cluster ingin membuka aplikasi web kita, paket data harus melewati **4 lapisan gerbang jaringan** secara berurutan:
+
+```text
+ ┌─────────────────────────────────────────────────────────────────────────┐
+ │ LAPISAN 1: KLIEN EKSTERNAL (Laptop Mac Host / Browser Pengguna)         │
+ │ Pengguna membuka: http://portal.sre.local:80                             │
+ └────────────────────────────────────┬────────────────────────────────────┘
+                                      │ 1. DNS resolve ke 198.19.249.200
+                                      ▼
+ ┌─────────────────────────────────────────────────────────────────────────┐
+ │ LAPISAN 2: BARE-METAL LOAD BALANCER (MetalLB VIP - Modul 2.3)           │
+ │ Alamat IP Virtual (VIP): 198.19.249.200 (Mengambang via protokol ARP L2)│
+ └────────────────────────────────────┬────────────────────────────────────┘
+                                      │ 2. Diteruskan ke Node penanggung jawab
+                                      ▼
+ ┌─────────────────────────────────────────────────────────────────────────┐
+ │ LAPISAN 3: INGRESS CONTROLLER (Traefik / Ingress-Nginx)                 │
+ │ Membaca Layer 7 HTTP Host Header: "Host: portal.sre.local"             │
+ └────────────────────────────────────┬────────────────────────────────────┘
+                                      │ 3. Merutekan ke Service backend yang pas
+                                      ▼
+ ┌─────────────────────────────────────────────────────────────────────────┐
+ │ LAPISAN 4: INTERNAL CLUSTER (Service ClusterIP & Pod)                   │
+ │ Service: portal-svc (10.43.100.50) ──► Pod Aplikasi (10.42.1.15)        │
+ └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Aturan on-prem:** alokasikan range terpisah untuk:
-- **Node IP** (static, server fisik/VM) — mis. `.10–.19`
-- **Service ClusterIP** (otomatis k3s, `10.43.0.0/16`)
-- **Pod IP** (otomatis k3s, `10.42.0.0/16`)
-- **LoadBalancer IP pool** (MetalLB) — mis. `.200–.250`
+### Penjelasan Peran Setiap Lapisan:
+1. **Lapisan 1 (External Client):** Laptop Mac atau peramban pengguna yang berada di luar cluster. Klien ini hanya mengetahui nama domain (misal: `portal.sre.local`).
+2. **Lapisan 2 (Load Balancer VIP):** Titik kontak fisik pertama. Alamat IP Virtual (VIP) mandiri yang dialokasikan oleh **MetalLB**. Alamat ini berada di subnet lokal data center sehingga bisa dijangkau langsung oleh laptop Mac.
+3. **Lapisan 3 (Ingress Controller):** Petugas pemeriksa tiket di pintu masuk. Membaca protokol HTTP Layer 7 untuk membedakan apakah pengguna ingin menuju `/api` atau `/web`, lalu meneruskannya ke Service yang bersangkutan.
+4. **Lapisan 4 (Internal Service & Pod):** Jaringan privat di dalam cluster yang menghubungkan Pod-Pod aplikasi.
 
-Bentrok IP = fault misterius (ARP conflict, traffic ke salah tujuan). Dokumentasikan range di `m2.2/topologi.md`.
+---
 
-## 5. Jalur Lengkap Traffic (Mac → Pod)
+## 4. Perencanaan Rentang Alokasi Subnet IP (IP Subnet Planning)
 
-Skenario: pengguna Mac membuka `http://app.k3s.local`.
+Salah satu keahlian wajib seorang SRE on-premises adalah merencanakan pembagian alokasi IP agar tidak terjadi **Tabrakan Alamat IP (*IP Collision / ARP Poisoning*)**.
 
+Di lingkungan laboratorium OrbStack kita, seluruh mesin virtual berada di subnet kelas C privat (biasanya di rentang **`198.19.249.0/24`**). Kita membaginya menjadi 4 wilayah kekuasaan yang terisolasi ketat:
+
+```text
+ SUBSET RENTANG JARINGAN (SUBNET 198.19.249.0/24):
+ ├── 198.19.249.1  - 198.19.249.9   ➔ Jatah Gateway & Router Host macOS
+ ├── 198.19.249.10 - 198.19.249.30  ➔ JATAH NODE FISIK / VM ORBSTACK (Static)
+ ├── 198.19.249.31 - 198.19.249.199 ➔ Ruang Cadangan Penambahan Server Masa Depan
+ └── 198.19.249.200 - 198.19.249.250➔ JATAH POOL METALLB (Alamat IP Virtual / VIP)
 ```
- 1. Mac resolve app.k3s.local (via /etc/hosts → 192.168.97.200, IP MetalLB)
- 2. Mac → 192.168.97.200:80 (LoadBalancer IP, dipegang salah satu node via ARP)
- 3. Node itu route ke Pod ingress-controller (Traefik/nginx)
- 4. Ingress cocokkan host "app.k3s.local" → Service "app"
- 5. Service "app" (ClusterIP) → Pod app (label selector)
- 6. Pod app balas "hello..." → kembali lewat jalur yang sama
+
+| Wilayah Jaringan | Rentang Alamat IP | Siapa Pengelolanya? | Keterangan Teknis |
+|---|---|---|---|
+| **Node VM Jaringan Fisik** | `198.19.249.10 – .30` | OrbStack / Sysadmin | Alamat IP fisik mesin Ubuntu server (`k3s-cp1`, `k3s-w1`, dll). |
+| **MetalLB VIP Pool** | `198.19.249.200 – .250` | **MetalLB Controller** | **Alamat IP Virtual publik cluster.** Harus di subnet yang sama dengan node agar bisa di-ping dari Mac, tetapi **DILARANG tumpang tindih dengan IP node mana pun!** |
+| **Service ClusterIP** | `10.43.0.0/16` | Internal k3s | Jaringan virtual internal k8s. Hanya ada di dalam memori kernel via iptables. |
+| **Pod Overlay Network** | `10.42.0.0/16` | CNI Flannel (k3s) | Jaringan virtual enkapsulasi VXLAN tempat masing-masing Pod bernaung. |
+
+> 💥 **Bencana Tabrakan IP (IP Collision):**
+> Jika kamu tidak sengaja memasukkan alamat IP milik node `k3s-cp1` (misal `198.19.249.10`) ke dalam daftar pool MetalLB, maka ketika ada Service yang meminta IP, MetalLB akan meminjamkan IP `.10` tersebut!
+> Akibatnya: Dua mesin berbeda akan mengaku memiliki IP yang sama di jaringan LAN lokal. Terjadi kekacauan protokol ARP (*ARP Collision*), koneksi SSH ke master server akan terputus, dan trafik web akan terlempar secara acak!
+
+---
+
+## 5. Melacak Aliran Paket Data (*End-to-End Packet Flow*)
+
+Mari kita telusuri secara presisi apa yang terjadi dalam hitungan milidetik ketika kamu membuka peramban di laptop Mac dan mengetik: **`http://portal.sre.local`**:
+
+```text
+ 1. Resolusi Nama Domain (Mac OS):
+    Laptop Mac membaca file /etc/hosts ➔ portal.sre.local = 198.19.249.200 (VIP MetalLB).
+    │
+    ▼
+ 2. Siapa Pemilik IP Ini? (Protokol ARP Layer 2):
+    Mac menyiarkan pertanyaan ARP ke jaringan lokal: "Siapa pemilik IP 198.19.249.200?"
+    Salah satu node worker (misal k3s-w1) menjawab: "Saya penanggung jawab IP tersebut! (MAC: xx:xx)".
+    │
+    ▼
+ 3. Paket Tiba di Pintu Gerbang Node (Node k3s-w1):
+    Paket tiba di kartu jaringan k3s-w1 pada Port 80.
+    Aturan iptables / kube-proxy di kernel Linux meneruskan paket ke Pod Ingress Controller.
+    │
+    ▼
+ 4. Pemeriksaan Tiket HTTP Layer 7 (Ingress Controller):
+    Ingress Controller (Traefik / Nginx) membaca Host Header: "portal.sre.local".
+    Melihat aturan: Host ini harus diteruskan ke Service internal 'portal-svc' di Port 8080.
+    │
+    ▼
+ 5. Pembagian Beban Internal (Kubernetes Service):
+    Service memilih salah satu Pod aplikasi yang sehat dari daftar Endpoints (misal Pod di k3s-w2).
+    │
+    ▼
+ 6. Jawaban Dikirim Balik ke Pengguna:
+    Pod memproses permintaan, menghasilkan HTML/JSON, lalu mengirimkannya kembali ke laptop Mac
+    melalui rute pembalikan yang sama. Halaman web berhasil tampil di layar!
 ```
 
-Tanpa MetalLB (sebelum Modul 2.3), langkah 1–3 diganti `NodePort` (`VMIP:30000+`) — bekerja tapi tidak "production-like" (port tinggi, tidak ada IP virtual).
+---
 
-## 6. Cloud vs On-Prem — Perbandingan
+## 6. Cetak Biru Dokumentasi Topologi Resmi SRE (`topologi.md`)
 
-| Aspek | Cloud (EKS/GKE) | On-prem (k3s, bootcamp) |
-|---|---|---|
-| Node IP | VPC otomatis | **Anda atur** (static) |
-| LoadBalancer | cloud provider (ELB) | **Anda pasang** (MetalLB) |
-| DNS | Route53 otomatis | **Anda kelola** (CoreDNS/hosts) |
-| Storage | EBS/GPD otomatis | **Anda kelola** (local-path/NFS) |
-| Certificate | cert-manager + cloud DNS | cert-manager + DNS challenge manual |
+Di dunia kerja nyata, seorang SRE wajib mendokumentasikan topologi infrastruktur yang dibangunnya. Dokumen ini bukan sekadar catatan pasif, melainkan menjadi acuan mutlak bagi tim keamanan dan **bahan baku penyusunan file *Inventory* Ansible pada Fase 4**.
 
-Inti: on-prem = **anda menjadi infra provider**. Bootcamp ini melatih peran itu (IaC Fase 3, Ansible Fase 4, observability Fase 7) — semuanya yang di cloud "gratis" dari provider.
-
-## 7. Diagram & Dokumentasi (Deliverable)
-
-Buat `m2.2/topologi.md` di repo — diagram & tabel IP:
+Berikut adalah standar format dokumentasi topologi resmi yang wajib kamu buat di dalam repositorimu (`materi/fase-2-kubernetes/modul-2.2-k3s-production/topologi.md`):
 
 ```markdown
-# m2.2 Topologi k3s HA di OrbStack
+# Dokumentasi Topologi Cluster k3s High Availability On-Premises
 
-## Node
-| Nama      | IP             | Peran           | Catatan              |
-|-----------|----------------|-----------------|----------------------|
-| k3s-cp1   | 192.168.97.10  | server (etcd)   | cluster-init         |
-| k3s-cp2   | 192.168.97.11  | server (etcd)   | join                 |
-| k3s-cp3   | 192.168.97.12  | server (etcd)   | join                 |
-| k3s-w1    | 192.168.97.20  | agent (worker)  | Pod jalan            |
-| k3s-w2    | 192.168.97.21  | agent (worker)  | Pod jalan            |
+## 1. Daftar Node Infrastruktur (Server VM)
+| Nama Host | Alamat IPv4 | Peran Cluster | CPU / RAM | Sistem Operasi |
+|---|---|---|---|---|
+| **k3s-cp1** | 198.19.249.10 | Control Plane + Embedded etcd (Init) | 2 Core / 2 GB | Ubuntu 24.04 LTS (ARM64) |
+| **k3s-cp2** | 198.19.249.11 | Control Plane + Embedded etcd (Join) | 2 Core / 2 GB | Ubuntu 24.04 LTS (ARM64) |
+| **k3s-cp3** | 198.19.249.12 | Control Plane + Embedded etcd (Join) | 2 Core / 2 GB | Ubuntu 24.04 LTS (ARM64) |
+| **k3s-w1**  | 198.19.249.20 | Worker Agent (Beban Kerja Pod)       | 2 Core / 2 GB | Ubuntu 24.04 LTS (ARM64) |
+| **k3s-w2**  | 198.19.249.21 | Worker Agent (Beban Kerja Pod)       | 2 Core / 2 GB | Ubuntu 24.04 LTS (ARM64) |
 
-## Range IP
-- Node: 192.168.97.10–.21
-- ClusterIP (Service): 10.43.0.0/16 (default k3s)
-- Pod: 10.42.0.0/16 (default k3s)
-- LoadBalancer pool (MetalLB, Modul 2.3): 192.168.97.200–.250
+## 2. Alokasi Rentang Subnet Jaringan
+- **Subnet Jaringan Fisik Node:** `198.19.249.0/24` (Gateway: `198.19.249.1`)
+- **Alokasi IP Node Server:** `198.19.249.10 – 198.19.249.30`
+- **Pool Alamat MetalLB (VIP):** `198.19.249.200 – 198.19.249.250` (Tersedia 51 Alamat VIP)
+- **Subnet Virtual Service k8s (ClusterIP):** `10.43.0.0/16` (Bawaan k3s)
+- **Subnet Virtual Pod k8s (Overlay Flannel):** `10.42.0.0/16` (Bawaan k3s)
 
-## Akses dari Mac
-- kubectl: kubeconfig context `k3s-ha` → CP1:6443
-- HTTP (nanti): app.k3s.local → 192.168.97.200 (MetalLB) → ingress → Service → Pod
-
-## Komponen disable
-- servicelb (siap MetalLB)
-- (traefik tetap, atau diganti nginx — catat pilihan)
+## 3. Kebijakan Komponen Cluster
+- **ServiceLB (Klipper):** Dinonaktifkan (`--disable servicelb`) untuk memberi jalan pada MetalLB di Modul 2.3.
+- **Traefik Ingress:** Aktif / Dinonaktifkan (Sesuai kebutuhan pengujian IngressClass).
+- **CoreDNS & Local Path Storage:** Aktif penuh.
 ```
 
-Dokumentasi topologi = deliverable SRE. Ansible (Fase 4) membaca "inventory" seperti tabel ini.
+---
 
-## 8. k3d vs k3s — Ringkasan Akhir
+## 7. Hands-On Mandiri Step-by-Step (15 Menit)
 
-| Aspek | k3d (Modul 2.1) | k3s di VM (modul ini) |
-|---|---|---|
-| Tujuan | latihan harian, iterasi cepat | simulasi production on-prem |
-| "Rumah" | container Docker | VM Linux (systemd) |
-| IP node | container (berubah) | VM (stabil = static-like) |
-| MetalLB L2 | sulit (ARP container) | bisa (jaringan VM) |
-| HA control plane | `--servers 3` (etcd container) | `--cluster-init` + join (etcd VM) |
-| Ansible target | tidak | ya |
-| etcd backup (2.4) | kurang relevan | inti |
-| Pakai di bootcamp | 2.1, sebagian 2.4 | 2.2, 2.3, 2.4, Fase 4–6 |
-
-**Sekarang kedua lane solid.** Fase 6 GitOps akan menggabungkan: k3d = staging, k3s = production.
-
-## Latihan Cepat (15 menit)
+Mari kita uji konektivitas topologi jaringan on-premise ini dari laptop Mac milikmu:
 
 ```bash
-# 1. Catat IP semua node (kalau sudah punya cluster 2.2)
-for n in k3s-cp1 k3s-cp2 k3s-cp3 k3s-w1 k3s-w2; do echo "$n: $(orb ip $n)"; done 2>/dev/null
+# --- LANGKAH 1: Verifikasi Alamat IP Seluruh Node VM ---
+echo "Memeriksa ketersediaan IP stabil node:"
+for node in k3s-cp1 k3s-cp2 k3s-cp3 k3s-w1 k3s-w2; do
+  echo "$node ➔ IP: $(orb ip $node 2>/dev/null || echo 'Belum dibuat')"
+done
 
-# 2. Cek IP stabil (stop/start 1 VM)
-orb stop k3s-cp1 2>/dev/null; orb start k3s-cp1; orb ip k3s-cp1
+# --- LANGKAH 2: Menguji Latensi Jaringan Antarnode ---
+# Kirim paket ICMP ping dari k3s-cp1 menuju k3s-w1:
+CP1_IP=$(orb ip k3s-cp1)
+W1_IP=$(orb ip k3s-w1)
 
-# 3. Rencanakan range (tulis di m2.2/topologi.md)
-#   - Node IP yang ada
-#   - Pilih range LB pool yang tidak bentrok
+ssh k3s-cp1 "ping -c 3 ${W1_IP}"
 
-# 4. (Tanpa MetalLB) akses app via NodePort sebagai placeholder
-kubectl create deployment web --image=nginx:alpine -n default 2>/dev/null
-kubectl expose deployment web --port=80 --type=NodePort -n default 2>/dev/null
-kubectl get svc web -n default
-NODEPORT=$(kubectl get svc web -n default -o jsonpath='{.spec.ports[0].nodePort}')
-curl -s http://$(orb ip k3s-cp1):$NODEPORT/ | head -1
+# --- LANGKAH 3: Simulasi Akses Sementara via NodePort Sebelum MetalLB ---
+# Terapkan aplikasi nginx pada namespace default:
+kubectl create deployment web-topologi --image=nginx:1.27-alpine
+kubectl expose deployment web-topologi --port=80 --type=NodePort
+
+# Ambil nomor NodePort acak yang dialokasikan (rentang 30000-32767):
+NODE_PORT=$(kubectl get svc web-topologi -o jsonpath='{.spec.ports[0].nodePort}')
+echo "Aplikasi dapat diakses sementara di seluruh IP Node pada Port: ${NODE_PORT}"
+
+# Uji akses dari Mac langsung ke IP k3s-w1 dan k3s-w2:
+curl -I "http://${W1_IP}:${NODE_PORT}"
+curl -I "http://$(orb ip k3s-w2):${NODE_PORT}"
+
+# Bersihkan deployment uji coba:
+kubectl delete svc web-topologi
+kubectl delete deployment web-topologi
 ```
 
-## Ringkasan
+---
 
-| Mau paham... | Inti |
+## 8. Pola Kegagalan Umum (Failure Modes) & Diagnosa SRE
+
+Berikut adalah 3 masalah klasik dalam perancangan topologi jaringan on-premise beserta solusinya:
+
+### Kasus 1: Akses Layanan Putus-Nyambung (*Intermittent Network Drops*)
+- **Gejala:** Saat melakukan curl ke IP Load Balancer, 1 kali berhasil, lalu 2 kali *Connection Timed Out*, lalu berhasil lagi secara bergantian.
+- **Penyebab:** Terjadi **Tabrakan Alamat IP (*IP Conflict*)**! Ada dua perangkat atau dua node yang sama-sama mengklaim Alamat IP tersebut di tabel ARP router.
+- **Diagnosa SRE:**
+  Periksa tabel tetangga ARP dari terminal Mac atau node Linux:
+  ```bash
+  arp -a | grep <IP-yang-bermasalah>
+  ```
+  Jika muncul pesan *duplicate IP address detected* atau alamat MAC berubah-ubah, segera ganti rentang pool MetalLB agar berada di luar jatah IP perangkat lain.
+
+---
+
+### Kasus 2: Domain `app.sre.local` Gagal Dibuka di Browser Mac
+- **Gejala:** Browser menampilkan pesan error `DNS_PROBE_FINISHED_NXDOMAIN`.
+- **Penyebab:** Kamu lupa mendaftarkan pemetaan nama domain tersebut ke file resolver `/etc/hosts` di laptop Mac milikmu.
+- **Solusi:** Buka `/etc/hosts` di Mac dan tambahkan baris pemetaan ke Alamat IP tujuan:
+  ```bash
+  echo "<ALAMAT_IP_VIP> app.sre.local" | sudo tee -a /etc/hosts
+  ```
+
+---
+
+### Kasus 3: Node Pod Tidak Bisa Mengakses Internet Luar (*Egress Blocked*)
+- **Gejala:** Container di dalam Pod gagal melakukan `curl https://google.com` atau gagal mengunduh dependensi dari internet.
+- **Penyebab:** Konfigurasi *IP Forwarding* di kernel sistem operasi server Linux dalam keadaan mati (`net.ipv4.ip_forward = 0`).
+- **Solusi SRE:** Aktifkan IP forwarding di dalam seluruh VM:
+  ```bash
+  sudo sysctl -w net.ipv4.ip_forward=1
+  echo "net.ipv4.ip_forward = 1" | sudo tee -a /etc/sysctl.d/99-kubernetes.conf
+  ```
+
+---
+
+## 9. Ringkasan & Langkah Selanjutnya
+
+### Tabel Jalan Pintas Topologi Jaringan (Cheat Sheet)
+
+| Kebutuhan Perancangan | Aturan Praktis SRE |
 |---|---|
-| Kenapa IP stabil | K8s on-prem butuh node IP tetap (etcd peer, Ansible) |
-| Lapisan akses | external → LB → ingress → Service → Pod |
-| Range IP | node / ClusterIP / Pod / LB pool — terpisah, tidak bentrok |
-| Cloud vs on-prem | cloud = gratis; on-prem = anda jadi infra provider |
-| Dokumentasi | topologi.md = deliverable; jadi inventory Ansible (Fase 4) |
+| **Alamat IP Node Fisik/VM** | Wajib **Statis** (tidak boleh berubah saat reboot) |
+| **Alokasi Pool MetalLB** | Wajib di **Subnet LAN yang sama**, tetapi di luar jatah IP Node |
+| **Subnet Pod & Service** | Ditentukan otomatis oleh k3s (`10.42.0.0/16` & `10.43.0.0/16`) |
+| **Akses HTTP Domain** | Klien ➔ MetalLB VIP ➔ Ingress ➔ Service ➔ Pod |
+| **Dokumen Topologi** | `topologi.md` menjadi acuan inventory Ansible di Fase 4 |
 
-## Cek Pemahaman
+---
 
-1. Kenapa DHCP (IP berubah) bermasalah untuk control plane K8s on-prem?
-2. Sebut 4 lapisan jalur traffic dari Mac client ke Pod (urut).
-3. Kenapa range IP LoadBalancer (MetalLB pool) harus terpisah dari node IP?
-4. Di cloud, `Service type=LoadBalancer` otomatis dapat IP. Di on-prem tanpa MetalLB, apa penggantinya sementara? Dan apa solusi "production-like" (modul mana)?
-5. Sebut 1 alasan documentation topologi penting untuk Ansible (Fase 4).
+### Uji Pemahaman Mandiri
+Jawablah pertanyaan reflektif berikut untuk menguji kesiapan arsitekturalmu sebelum memasuki laboratorium MetalLB:
+
+1. **Jelaskan perbedaan mendasar antara cara kerja perolehan Alamat IP LoadBalancer di Cloud Publik (seperti AWS EKS) dibandingkan di lingkungan On-Premises bare-metal data center!**
+2. **Mengapa alamat IP dari Pool MetalLB harus berada pada subnet LAN yang sama dengan node-node k3s, namun dilarang keras menggunakan angka IP yang sudah dipakai oleh server fisik? Apa bahaya fatal jika terjadi tumpang tindih?**
+3. **Urutkan dan jelaskan 4 lapisan akses jaringan (*The 4 Access Layers*) yang dilalui oleh sebuah paket data dari saat pengguna menekan tombol Enter di browser Mac hingga dijawab oleh Pod backend!**
+4. **Mengapa dokumen perancangan topologi jaringan (`topologi.md`) menjadi artefak kerja yang sangat berharga bagi seorang SRE saat mempersiapkan otomatisasi infrastruktur menggunakan Ansible di Fase 4?**
+
+---
+*Selamat! Kamu telah menguasai seluruh materi teori Modul 2.2. Lanjutkan ke laboratorium praktik: [lab/LAB-01-k3s-single-node-vm.md](lab/LAB-01-k3s-single-node-vm.md) dan [lab/LAB-02-k3s-multi-node-topologi.md](lab/LAB-02-k3s-multi-node-topologi.md) untuk mulai membangun cluster High Availability secara nyata di atas VM OrbStack!*
