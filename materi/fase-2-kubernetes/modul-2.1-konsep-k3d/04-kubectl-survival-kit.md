@@ -1,252 +1,406 @@
-# 04 — kubectl Survival Kit
+# 04 — kubectl Survival Kit: Perintah Harian, Format Output & Alur Debug SRE
 
-> Perintah yang Anda pakai setiap hari sebagai SRE — dan debug flow saat Pod tidak jalan.
+> **Ringkasan:** Menguasai pisau lipat serbaguna seorang SRE di terminal: mahir menggunakan empat serangkai perintah inti (**`get`**, **`describe`**, **`logs`**, **`exec`**), memfilter data dengan **Label Selectors** dan **JSONPath**, menguasai alur sistematis investigasi insiden (**5-Step Debug Flow**), membedah arti **Exit Code** kematian container, serta trik tingkat lanjut **Ephemeral Debug Container** pada image tanpa shell (*Distroless*).
 
-## Tujuan
-- Bisa memakai kubectl survival kit: get, describe, logs, exec, port-forward, top
-- Bisa memilih output format (`-o wide`, `-o yaml`, `-o jsonpath`, `-o name`)
-- Bisa memakai label selector & namespace untuk filter
-- Bisa menjalankan debug flow: describe → events → logs → exec → resolve
-- Bisa menjelaskan exit code & status Pod umum (Running, CrashLoopBackOff, ImagePullBackOff, Pending)
+---
 
-## 1. Survival Kit — Get, Describe, Logs, Exec
+## Tujuan Pembelajaran
+Setelah mempelajari materi ini dan mempraktikkannya di terminal MacBook, kamu akan mampu:
+- Menavigasi dan menginvestigasi objek Kubernetes dengan cepat menggunakan perintah **`kubectl`** tanpa bergantung pada antarmuka grafis (GUI).
+- Memilih format tampilan data yang tepat (**`-o wide`**, **`-o yaml`**, **`-o jsonpath`**, dan **`-o name`**) untuk kebutuhan inspeksi manual maupun skrip otomasi.
+- Menjalankan prosedur investigasi standar insiden SRE (**5-Step Debug Flow**) saat menemukan Pod yang bermasalah.
+- Membaca dan menafsirkan arti dari riwayat **Events** dan pesan kematian aplikasi menggunakan **`kubectl logs --previous`**.
+- Mendiagnosa penyebab status abnormal pada Pod (**`Pending`**, **`ImagePullBackOff`**, **`CrashLoopBackOff`**, dan **`OOMKilled`** / Exit Code 137).
+- Melakukan investigasi interaktif pada container *Distroless* menggunakan fitur canggih **`kubectl debug`**.
+- Mengonfigurasi alias dan *shell autocompletion* di terminal untuk melipatgandakan kecepatan kerja harian (*muscle memory*).
+
+---
+
+## 1. Mindset SRE: Mengapa Terminal Adalah Rumah Utama Kita?
+
+Di lingkungan cloud publik atau tutorial pemula, sering kali orang tergoda menggunakan dashboard grafis web (seperti Kubernetes Dashboard atau k9s).
+Namun, di dunia **Site Reliability Engineering (SRE) Production On-Premises**:
+1. Server di data center terisolasi di balik jaringan privat ketat (*air-gapped*) yang **tidak mengizinkan pembukaan port antarmuka web** demi keamanan.
+2. Ketika terjadi insiden kebakaran sistem (*outage*), dashboard grafis sering kali ikut tumbang atau lambat memuat data karena API server sedang kebanjiran beban.
+3. Kecepatan seorang SRE dalam memulihkan sistem dihitung dalam menit dan detik. Menggunakan perintah terminal **`kubectl`** yang sudah melekat di jari (*muscle memory*) adalah cara tercepat untuk menyelamatkan operasional perusahaan!
+
+---
+
+## 2. Empat Serangkai Perintah Inti: Get, Describe, Logs, dan Exec
+
+Hampir 90% waktu investigasimu di Kubernetes akan dihabiskan bersama empat perintah berikut:
+
+```text
+ ┌─────────────────────────────────────────────────────────────────────────┐
+ │               EMPAT PILAR INVESTIGASI HARIAN KUBECTL                    │
+ ├───────────────────┬─────────────────────────────────────────────────────┤
+ │ 1. kubectl get    │ "Ada apa saja di sini dan bagaimana status umumnya?"│
+ │ 2. kubectl describe│ "Ceritakan riwayat hidup & masalah apa yang terjadi"│
+ │ 3. kubectl logs   │ "Apa kata aplikasi di dalam layar terminalnya?"     │
+ │ 4. kubectl exec   │ "Izinkan saya masuk ke dalam untuk memeriksa!"      │
+ └───────────────────┴─────────────────────────────────────────────────────┘
+```
+
+---
+
+### Pilar 1: `kubectl get` — Memeriksa Kondisi Umum Objek
+Perintah `get` digunakan untuk menampilkan daftar satu atau banyak objek dalam format tabel ringkas:
 
 ```bash
-# GET — lihat objek
-kubectl get pods                      # semua Pod di namespace aktif
-kubectl get pods -A                   # semua namespace
-kubectl get pods -o wide              # + node, IP
-kubectl get pods -o yaml             # full spec/status (debug mendalam)
-kubectl get pods -o name             # hanya nama (untuk script)
-kubectl get pods -o jsonpath='{.items[*].metadata.name}'
-kubectl get pods -l app=web          # filter label
-kubectl get pods -n prod             # namespace spesifik
-kubectl get all                      # semua objek utama
+# Melihat Pod di namespace aktif
+kubectl get pods
 
-# DESCRIBE — cerita lengkap (+ events: riwayat masalah)
-kubectl describe pod <name>          # lihat bagian Events di bawah!
-kubectl describe node <name>         # resource, taint, kondisi
+# Melihat Pod di SELURUH namespace yang ada di cluster (-A = --all-namespaces)
+kubectl get pods -A
 
-# LOGS — output container
-kubectl logs <pod>                   # stdout
-kubectl logs <pod> -c <container>     # multi-container Pod
-kubectl logs <pod> --previous        # log container yang crash sebelumnya
-kubectl logs -f deploy/app            # follow, semua replica
-kubectl logs --since=10m deploy/app  # filter waktu
+# Melihat objek gabungan sekaligus (Pod, Service, Deployment):
+kubectl get pods,svc,deploy
 
-# EXEC — masuk container
-kubectl exec -it <pod> -- sh
-kubectl exec -it <pod> -c <container> -- sh
-kubectl exec <pod> -- env            # one-off, non-interactive
-
-# PORT-FORWARD — akses lokal ke Service/Pod (debug, tanpa Ingress)
-kubectl port-forward svc/app 9090:80 # Mac:9090 → Service:80
-kubectl port-forward pod/<name> 9090:8080
-# (Ctrl+C untuk stop)
+# Menampilkan seluruh objek utama yang ada di namespace default:
+kubectl get all
 ```
 
-## 2. Output Format (`-o`)
+---
 
-| Format | Untuk |
-|---|---|
-| (default) | tabel ringkas |
-| `-o wide` | + kolom tambahan (node, IP) |
-| `-o yaml` | spec/status penuh (debug, salin manifest) |
-| `-o jsonpath=...` | ekstrak field spesifik (script, CI) |
-| `-o name` | hanya nama objek |
-| `-o json` | JSON penuh (pipe ke `jq`) |
+### Pilar 2: `kubectl describe` — Membaca Rekam Medis Lengkap Objek
+Jika `get` hanya memberikan gambaran sekilas (misal: status `CrashLoopBackOff`), maka **`describe`** adalah dokter spesialis yang membuka **Buku Rekam Medis Lengkap** dari objek tersebut:
 
 ```bash
-# jsonpath sering dipakai untuk automation/cheatsheet
-kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.phase}{"\n"}{end}'
-kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}'
+kubectl describe pod <nama-pod>
+kubectl describe node <nama-node>
 ```
 
-## 3. Label, Selector & Namespace
+> 🔍 **Bagian Paling Berharga di Output Describe: `Events`!**
+> Saat menjalankan `kubectl describe pod`, **jangan berhenti di baris atas! Gulir layar terminalmu ke bagian paling bawah (bagian `Events`)**.
+> Di sanalah Kubernetes mencatat buku harian kronologis kejadian:
+> - Kapan Pod dijadwalkan oleh scheduler?
+> - Apakah proses penarikan image dari registry gagal (*Failed to pull image*)?
+> - Apakah container ditolak karena memori server penuh?
+> - Berapa kali container mati dan menyala ulang?
+> **90% akar masalah kerusakan Pod akan langsung terungkap di bagian Events ini!**
+
+---
+
+### Pilar 3: `kubectl logs` — Membaca Cetakan Log Aplikasi
+Jika bagian `Events` di `describe` tidak menunjukkan kesalahan infrastruktur, artinya masalahnya ada di dalam **kodingan aplikasi itu sendiri** (misalnya: gagal membaca password database atau sintaks error saat parsing file JSON).
 
 ```bash
-# Label di metadata: app=web, env=prod, tier=frontend
-kubectl get pods -l app=web                 # equality
-kubectl get pods -l 'app in (web,api)'       # set-based
-kubectl get pods -l app=web,env=prod        # gabungan (AND)
-kubectl get pods --show-labels              # lihat semua label Pod
+# Membaca log output (stdout/stderr) dari sebuah Pod:
+kubectl logs <nama-pod>
 
-# Namespace
-kubectl get pods -A                         # semua namespace
-kubectl get pods -n kube-system
-kubectl config set-context --current --namespace=prod   # ganti ns default context
+# Memantau aliran log secara langsung/mengalir (-f = follow / live streaming):
+kubectl logs -f <nama-pod>
+
+# Membaca 50 baris terakhir saja (--tail):
+kubectl logs --tail=50 <nama-pod>
+
+# Membaca log dari seluruh Pod di dalam sebuah Deployment sekaligus:
+kubectl logs -f deployment/<nama-deployment>
+
+# Jika Pod memiliki LEBIH DARI 1 container (Multi-Container/Sidecar), sebutkan nama containernya:
+kubectl logs <nama-pod> -c <nama-container>
 ```
 
-**Pattern SRE:** tag konsisten (`app`, `env`, `tier`, `version`) — Service & debug bergantung label benar. Helm (Fase 5) auto-label release.
+> 💀 **Senjata Rahasia SRE: Bendera `--previous`!**
+> Bayangkan skenario ini: Aplikasi di dalam Pod mengalami crash, mati, lalu otomatis dinyalakan ulang oleh kubelet.
+> Saat kamu mengetik `kubectl logs <nama-pod>`, yang tampil adalah log dari **container baru yang baru saja menyala**, sedangkan pesan error penyebab kematian container sebelumnya sudah hilang!
+> Gunakan bendera **`--previous`** untuk membaca log dari **container yang mati sesaat sebelum restart**:
+> ```bash
+> kubectl logs <nama-pod> --previous
+> ```
 
-## 4. Apply, Delete, Scale, Rollout
+---
+
+### Pilar 4: `kubectl exec` — Masuk ke Dalam Lingkungan Container
+Terkadang membaca log saja belum cukup. Kita perlu masuk ke dalam sistem file container untuk mengecek apakah file konfigurasi benar-benar terpasang, menguji koneksi database menggunakan `nc` atau `ping`, atau mengintip variabel lingkungan:
 
 ```bash
-# Deklaratif (utama)
-kubectl apply -f deploy.yaml               # create/update
-kubectl apply -f manifests/               # direktori (semua YAML)
-kubectl apply -k overlays/prod             # kustomize (Fase 5)
+# Masuk secara interaktif (-it) ke dalam shell container:
+kubectl exec -it <nama-pod> -- sh
+# (atau '/bin/bash' jika image berbasis Ubuntu/Debian)
 
-# Imperatif (cepat, tapi kurang reproducible)
-kubectl create deployment web --image=nginx:alpine
-kubectl scale deployment app --replicas=5
-kubectl delete pod <name>                  # Pod dihapus, Deployment buat baru
-kubectl delete -f deploy.yaml              # hapus objek dari manifest
-
-# Rollout
-kubectl rollout status deployment/app
-kubectl rollout history deployment/app
-kubectl rollout undo deployment/app
-kubectl rollout undo deployment/app --to-revision=2
-kubectl restart deployment/app             # mulai ulang Pod (pull image baru)
+# Menjalankan satu perintah langsung dari luar TANPA masuk shell interaktif:
+kubectl exec <nama-pod> -- printenv
+kubectl exec <nama-pod> -- cat /etc/config/app.conf
 ```
 
-**Aturan SRE:** `apply` (deklaratif) > imperatif. Manifest di Git = reproducible (GitOps — Fase 6). Imperatif (`create deployment`) cepat tapi hilang dari ingatan. Pakai imperatif hanya untuk eksplorasi/debug, lalu tulis YAML.
+---
 
-## 5. Resource & Top
+### Bonus Jalan Tol Sementara: `kubectl port-forward`
+Bagaimana cara mengetes layanan database atau backend yang bertipe `ClusterIP` (yang tidak punya IP publik) langsung dari laptop Mac milikmu tanpa perlu memasang Ingress?
+Gunakan **`kubectl port-forward`**:
 
 ```bash
-kubectl top nodes                          # CPU/mem per node (butuh metrics-server; k3s punya)
-kubectl top pods                           # per Pod di ns aktif
-kubectl top pods -A                        # semua namespace
-kubectl describe node <name> | grep -A5 Allocatable   # resource kapasitas node
+# Buka jalan tol dari port 9090 di Mac langsung menuju port 80 milik Service:
+kubectl port-forward svc/<nama-service> 9090:80
+
+# Atau langsung tembak ke satu Pod spesifik:
+kubectl port-forward pod/<nama-pod> 8080:8080
 ```
+Selama jendela terminal tersebut terbuka, kamu bisa membuka `http://localhost:9090` di browser Mac-mu! Tekan `Ctrl + C` untuk menutup jalan tol tersebut.
 
-## 6. Debug Flow — Saat Pod Tidak Jalan
+---
 
-Urutan investigasi yang konsisten menemukan akar masalah:
+## 3. Seni Memilih Format Tampilan Data (`-o`)
 
-```
- 1. kubectl get pod <name>            → status (Pending? CrashLoopBackOff? ImagePullBackOff?)
- 2. kubectl describe pod <name>      → Events di bawah (scheduled? image pull fail? OOMKill?)
- 3. kubectl logs <name>               → output app (error runtime)
- 4. kubectl logs <name> --previous    → log sebelum crash
- 5. kubectl exec -it <name> -- sh     → masuk, cek filesystem/env/koneksi
- 6. resolve + kubectl apply lagi
-```
+Sebagai seorang SRE, kamu sering kali butuh mengekstrak data spesifik dari ratusan Pod untuk dimasukkan ke dalam skrip bash atau laporan insiden.
+Gunakan bendera **`-o` (output format)**:
 
-### Status Pod Umum & Akar Masalah
-
-| Status | Gejala | Kemungkinan penyebab |
+| Format Bendera | Tampilan yang Dihasilkan | Kapan Digunakan? |
 |---|---|---|
-| **Pending** | Pod tidak jalan, tidak ada node | resource request terlalu besar; taint/toleration; node penuh; PVC menunggu |
-| **ImagePullBackOff** | container tidak start | image/tag salah; registry private tanpa `imagePullSecret`; arch mismatch (amd64-only di arm64) |
-| **CrashLoopBackOff** | container start lalu crash, berulang | app error di startup; env/config salah; livenessProbe gagal |
-| **OOMKilled** (exit 137) | container mati | memory limit terlalu kecil / app memory leak |
-| **Error** (exit non-0) | container exit | app crash code; lihat `logs --previous` |
-| **RunContainerError** | container tidak start | image arch salah (`exec format error`); biner hilang |
+| *(Default tanpa `-o`)* | Tabel ringkas standar | Pemeriksaan cepat sehari-hari |
+| **`-o wide`** | Tabel lebar dengan kolom ekstra (**IP Pod, Node tempat Pod tinggal**, dan arsitektur) | Memeriksa apakah Pod tersebar merata di antar-node |
+| **`-o yaml`** | Seluruh spesifikasi teknis dan status dalam format YAML | Menyelidiki konfigurasi detail atau menyalin manifes objek |
+| **`-o name`** | Hanya mencetak jenis dan nama objek (misal: `pod/web-123`) | Sangat berguna untuk looping di dalam bash script |
+| **`-o jsonpath=...`** | Mengekstrak isi data spesifik menggunakan kueri path JSON | Mengambil alamat IP atau status Pod secara presisi |
 
+### Contoh Penggunaan JSONPath Praktis:
 ```bash
-kubectl get pod <name>
-# NAME   READY   STATUS             RESTARTS   AGE
-# app-0  0/1     CrashLoopBackOff    7          9m
+# 1. Ambil HANYA nama Pod pertama di namespace default:
+kubectl get pods -o jsonpath='{.items[0].metadata.name}'
 
-kubectl describe pod app-0 | tail -20    # Events: "Back-off restarting failed container"
-kubectl logs app-0 --previous            # error runtime (mis. "cannot connect to db")
+# 2. Ambil seluruh Alamat IP internal milik semua node worker:
+kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}'
+
+# 3. Cetak daftar nama Pod beserta status phase-nya dipisahkan tab:
+kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.phase}{"\n"}{end}'
 ```
 
-### Exit Code Cepat
+---
 
-| Code | Arti |
+## 4. Seni Memfilter: Labels, Selectors, dan Namespaces
+
+Di cluster yang memiliki 1.000 Pod, menjalankan `kubectl get pods` biasa akan menghasilkan dinding teks yang membuat pusing. Kita harus menyaringnya menggunakan **Label Selector**:
+
+```bash
+# 1. Filter persamaan tunggal (Ambil Pod yang berlabel app=portal):
+kubectl get pods -l app=portal
+
+# 2. Filter kombinasi DAN (app=portal DAN env=production):
+kubectl get pods -l app=portal,env=production
+
+# 3. Filter himpunan (Ambil Pod yang perannya frontend ATAU backend):
+kubectl get pods -l 'tier in (frontend, backend)'
+
+# 4. Tampilkan semua Pod beserta kolom label yang mereka miliki:
+kubectl get pods --show-labels
+```
+
+### Mengganti Namespace Default pada Terminal
+Bosan mengetik `-n production` di setiap akhir perintah?
+Ubah namespace aktif pada context Kubeconfig komputermu dengan perintah ini:
+```bash
+kubectl config set-context --current --namespace=production
+# Sekarang setiap perintah 'kubectl get pods' otomatis melihat namespace production!
+```
+
+---
+
+## 5. Prosedur Baku SRE: 5-Step Debug Flow Saat Pod Bermasalah
+
+Ketika alarm sistem berbunyi atau sebuah Pod gagal menyala, **JANGAN MENEBAK-NEBAK!**
+Gunakan protokol investigasi 5 langkah terstruktur berikut:
+
+```text
+ ┌─────────────────────────────────────────────────────────────────────────┐
+ │               PROTOKOL INVESTIGASI 5 LANGKAH SRE (DEBUG FLOW)           │
+ └────────────────────────────────────┬────────────────────────────────────┘
+                                      │
+  LANGKAH 1: IDENTIFIKASI             ▼
+  kubectl get pods -o wide     ───► Apa statusnya? (Pending / CrashLoop / OOM?)
+                                      │
+  LANGKAH 2: REKAM MEDIS & EVENT      ▼
+  kubectl describe pod <nama>  ───► Baca bagian 'Events' di paling bawah!
+                                    (Apakah node penuh? Image salah?)
+                                      │
+  LANGKAH 3: LOG RUNTIME INTERNAL     ▼
+  kubectl logs <nama>          ───► Baca output error aplikasi.
+  kubectl logs <nama> --previous    (Jika container mati-hidup, baca log sebelumnya!)
+                                      │
+  LANGKAH 4: INSPEKSI LANGSUNG        ▼
+  kubectl exec -it <nama> -- sh───► Periksa file config, disk, atau DNS database.
+  (atau kubectl debug)
+                                      │
+  LANGKAH 5: PERBAIKAN & VALIDASI     ▼
+  kubectl apply -f manifest.yaml ─► Terapkan perbaikan, pantau 'kubectl rollout status'
+```
+
+---
+
+## 6. Kamus Status Abnormal Pod & Exit Code Kematian Container
+
+Berikut adalah tabel contekan cepat untuk mengenali arti dari status-status error yang paling sering muncul di terminal:
+
+| Status Pod di Terminal | Apa yang Sebenarnya Terjadi? | Penyebab Paling Sering & Solusi |
+|---|---|---|
+| **`Pending`** | Pod sudah dicatat di etcd, namun belum mulai berjalan di node mana pun. | **Scheduler gagal menemukan node yang cukup:** Seluruh node kehabisan jatah CPU/RAM (`Insufficient memory`), atau PVC penyimpanan belum berhasil terpasang. |
+| **`ImagePullBackOff`** / `ErrImagePull` | Container gagal menyala karena imagenya tidak bisa diunduh. | **Salah ketik nama image/tag**, repositori privat belum diberi `imagePullSecret`, atau image belum di-import ke k3d (`k3d image import`). |
+| **`CrashLoopBackOff`** | Container berhasil diunduh dan sempat jalan, tetapi langsung mati lalu di-restart berulang kali oleh kubelet. | **Aplikasi gagal start:** File konfigurasi salah ketik, variabel lingkungan database belum disuntikkan, atau *Liveness Probe* gagal merespons. |
+| **`OOMKilled`** (Exit 137) | Container dibunuh secara paksa oleh Kernel Linux menggunakan sinyal `SIGKILL`. | Aplikasi memakan RAM melebihi angka `resources.limits.memory` pada manifes Pod, atau ada kebocoran memori (*memory leak*). Solusi: Naikkan limit memori. |
+| **`CreateContainerConfigError`** | Kubernetes menolak membuat container sebelum ia menyala. | Pod mereferensikan nama **ConfigMap** atau **Secret** yang belum dibuat atau salah ketik namanya. |
+
+---
+
+### Membedah Angka "Exit Code"
+Ketika container berhenti, sistem operasi Linux selalu meninggalkan sebuah nomor kode keluar (*Exit Code*):
+
+```text
+  Exit Code = 0   ➔ Berjalan lancar sampai selesai (Sukses / Normal).
+  Exit Code = 1   ➔ Aplikasi berhenti karena error internal kodingan / exception.
+  Exit Code = 137 ➔ OOMKilled (128 + Sinyal 9 SIGKILL: Dibunuh paksa oleh kernel karena rakus RAM).
+  Exit Code = 143 ➔ Graceful Shutdown (128 + Sinyal 15 SIGTERM: Dimatikan sopan oleh k8s saat rollout).
+  Exit Code = 126 ➔ Perintah utama di container tidak memiliki izin eksekusi (chmod +x hilang).
+  Exit Code = 127 ➔ Perintah utama / biner program tidak ditemukan di dalam PATH container.
+```
+
+---
+
+## 7. Trik Tingkat Lanjut: Ephemeral Debug Container (`kubectl debug`)
+
+Di Modul 1.1, kita belajar bahwa standar keamanan production mengharuskan kita menggunakan base image **Google Distroless** yang **tidak memiliki shell (`sh` atau `bash`)** dan tidak memiliki alat `curl`, `ls`, maupun `ping`.
+
+Lalu, bagaimana jika sebuah Pod Distroless di production mengalami gangguan dan kita perlu mendebugnya? Jika kamu mengetik `kubectl exec -it <pod> -- sh`, terminal akan menolak dengan error: `OCI runtime exec failed: exec: "sh": executable file not found in $PATH`.
+
+### Solusinya: `kubectl debug` (Suntikan Kontainer Dokter Sementara)
+Kubernetes menyediakan fitur canggih bernama **Ephemeral Containers**:
+Kita bisa menyuntikkan satu container baru yang lengkap dengan peralatan bedah (seperti Alpine Linux yang punya `sh`, `curl`, dan `netstat`) langsung ke dalam kamar Pod yang sedang sakit, lalu berbagi *Process Namespace* dengan aplikasi yang bermasalah!
+
+```bash
+# Suntikkan container dokter berbasis Alpine ke dalam Pod yang bermasalah:
+kubectl debug -it <nama-pod> --image=nicolaka/netshoot --target=<nama-container-target>
+```
+Sekarang kamu memiliki terminal Linux lengkap dengan segala alat diagnosa jaringan untuk memeriksa aplikasi Distroless tersebut tanpa perlu mengubah atau merestart aplikasi aslinya!
+
+---
+
+## 8. Meningkatkan Kecepatan Tangan: Aliases & Autocompletion
+
+Seorang engineer SRE senior tidak pernah mengetik kata `kubectl get pods` huruf demi huruf sebanyak 100 kali sehari. Mereka mengonfigurasi jalan pintas (*alias*) di dalam file profil shell (`~/.zshrc` di macOS):
+
+### Tambahkan Baris Ini ke Dalam `~/.zshrc`:
+```bash
+# 1. Alias perintah dasar
+alias k="kubectl"
+alias kgp="kubectl get pods"
+alias kgpa="kubectl get pods -A"
+alias kgpw="kubectl get pods -o wide"
+alias kdp="kubectl describe pod"
+alias kl="kubectl logs"
+alias klf="kubectl logs -f"
+alias klp="kubectl logs --previous"
+alias kx="kubectl exec -it"
+alias kpf="kubectl port-forward"
+
+# 2. Aktifkan autocompletion tombol TAB untuk alias 'k'
+source <(kubectl completion zsh)
+complete -o default -F __start_kubectl k
+```
+
+Setelah menyimpannya, jalankan `source ~/.zshrc`. Sekarang kamu cukup mengetik `k get pods` atau menekan tombol `TAB` dua kali untuk melengkapi nama Pod secara otomatis!
+
+---
+
+## 9. Hands-On Mandiri Step-by-Step (25 Menit)
+
+Mari kita simulasikan 3 skenario kegagalan Pod di cluster `k3d` dan latih kemampuan diagnosamu menggunakan alur *Debug Flow*:
+
+```bash
+# --- LANGKAH 1: Pastikan Cluster k3d 'lab' Menyala ---
+k3d cluster start lab 2>/dev/null || k3d cluster create lab --servers 1 --agents 2 --port 8080:80@loadbalancer
+
+# --- LANGKAH 2: Simulasi Kasus 1 — ImagePullBackOff ---
+# Buat deployment dengan nama tag yang sengaja dibuat salah:
+kubectl create deployment kasus-salah-tag --image=nginx:versi-palsu-12345
+
+# Jalankan Debug Flow Langkah 1 & 2:
+kubectl get pods
+# Amati status: ErrImagePull / ImagePullBackOff
+
+kubectl describe pod -l app=kasus-salah-tag | tail -n 15
+# Perhatikan bagian Events: "Failed to pull image ... manifest unknown"
+
+# Bersihkan:
+kubectl delete deployment kasus-salah-tag
+
+# --- LANGKAH 3: Simulasi Kasus 2 — CrashLoopBackOff & Logs --previous ---
+# Buat Pod yang perintahnya sengaja dibuat gagal setelah jalan 1 detik:
+cat << 'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kasus-crash
+spec:
+  containers:
+  - name: gagal
+    image: alpine:3.20
+    command: ["sh", "-c", "echo 'Memulai inisialisasi...'; sleep 2; echo 'FATAL: File konfigurasi tidak ditemukan!' >&2; exit 1"]
+EOF
+
+# Tunggu 10 detik hingga Kubernetes mencoba me-restart container beberapa kali:
+sleep 10
+kubectl get pod kasus-crash
+# Amati status: CrashLoopBackOff dengan jumlah Restarts bertambah!
+
+# Jalankan Debug Flow Langkah 3 (Baca log container yang mati sebelumnya):
+kubectl logs kasus-crash --previous
+
+# Bersihkan:
+kubectl delete pod kasus-crash
+
+# --- LANGKAH 4: Simulasi Kasus 3 — OOMKilled (Exit Code 137) ---
+# Buat Pod dengan batas limit RAM hanya 20MB, namun alokasikan 50MB di memori:
+cat << 'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kasus-oom
+spec:
+  containers:
+  - name: rakus-ram
+    image: alpine:3.20
+    resources:
+      limits:
+        memory: "20Mi"
+    command: ["sh", "-c", "dd if=/dev/zero of=/dev/shm/beban bs=1M count=50"]
+EOF
+
+sleep 5
+# Periksa status kematian dan exit code:
+kubectl describe pod kasus-oom | grep -E "Terminated|Exit Code|Reason"
+# Output yang muncul: Reason: OOMKilled | Exit Code: 137
+
+# Bersihkan:
+kubectl delete pod kasus-oom
+```
+
+---
+
+## 10. Ringkasan & Langkah Selanjutnya
+
+### Tabel Jalan Pintas kubectl Survival Kit (Cheat Sheet)
+
+| Kebutuhan Diagnosa | Perintah Terminal |
 |---|---|
-| 0 | selesai normal |
-| 1 | error aplikasi umum |
-| 137 | **OOMKilled** (SIGKILL, 128+9) — memory limit |
-| 139 | SIGSEGV (segfault) — 128+11 |
-| 126 | command tidak executable |
+| **Cek status semua Pod di cluster** | `kubectl get pods -A -o wide` |
+| **Buka rekam medis & riwayat Events**| `kubectl describe pod <nama-pod>` |
+| **Streaming log aplikasi** | `kubectl logs -f <nama-pod>` |
+| **Baca log container yang baru mati** | `kubectl logs <nama-pod> --previous` |
+| **Masuk shell container** | `kubectl exec -it <nama-pod> -- sh` |
+| **Bypass port ke laptop Mac** | `kubectl port-forward svc/<name> 9090:80` |
+| **Cek pemakaian CPU & RAM Pod** | `kubectl top pods` |
+| **Cek Pod dengan filter label** | `kubectl get pods -l app=<nama>,env=prod` |
+| **Investigasi Pod tanpa shell** | `kubectl debug -it <pod> --image=alpine` |
 
-## 7. Ephemeral Debug Container (Trik SRE)
+---
 
-Pod production mungkin tidak punya shell (distroless — Modul 1.1). Pakai **debug container** ephemeral:
+### Uji Pemahaman Mandiri
+Jawablah pertanyaan reflektif berikut untuk membuktikan ketajaman kemampuan troubleshooting milikmu:
 
-```bash
-kubectl debug -it <pod> --image=alpine --target=<container>
-# atau copy Pod (jaga yang asli):
-kubectl debug -it <pod> --copy-to=app-debug --image=busybox --share-processes -- /bin/sh
-```
+1. **Kamu menemukan sebuah Pod berstatus `CrashLoopBackOff`. Sebutkan 5 langkah urutan investigasi sistematis (*Debug Flow*) yang harus kamu jalankan untuk menemukan akar masalahnya!**
+2. **Saat menjalankan perintah `kubectl logs <pod-bermasalah>`, terminal hanya menampilkan baris log yang sangat sedikit dan terputus. Mengapa menambahkan parameter `--previous` menjadi sangat penting pada kasus ini?**
+3. **Sebuah container mati dengan `Exit Code 137`. Jelaskan rumus matematika sistem operasi Linux di balik angka 137 tersebut, sinyal apa yang dikirimkan, dan apa penyebab utamanya?**
+4. **Apa perbedaan fungsi praktis antara perintah `kubectl describe pod <nama>` dengan perintah `kubectl logs <nama>`? Informasi apa yang hanya bisa ditemukan di `describe` dan tidak ada di `logs`?**
+5. **Jika sebuah aplikasi di production menggunakan image *Distroless* (tanpa shell `sh`/`bash`), bagaimana cara seorang SRE masuk dan menginvestigasi jaringan di dalam Pod tersebut tanpa mematikan aplikasi yang sedang berjalan?**
 
-Berguna untuk memeriksa Pod distroless tanpa ubah image. Fase 2.4 mendalami ini.
-
-## 8. Aliases & Cheatsheet Pribadi
-
-Buat `m2.1/kubectl-notes.md` di repo — cheatsheet pribadi (muscle memory):
-
-```bash
-# Aliases di ~/.zshrc (opsional, hemat ketik)
-alias k=kubectl
-alias kgp='kubectl get pods'
-alias kgpa='kubectl get pods -A'
-alias kdp='kubectl describe pod'
-alias kl='kubectl logs'
-alias kx='kubectl exec -it'
-complete -o default -F __start_kubectl k   # completion (brew install kubectl completions)
-```
-
-```bash
-# Lihat semua objek di namespace
-kubectl get all,cm,secret,pvc,ing -n prod
-
-# Cek apa yang dipakai Service (endpoints)
-kubectl get endpoints app
-
-# Cek image yang jalan (apakah update?)
-kubectl get pods -o jsonpath='{.items[*].spec.containers[*].image}'
-```
-
-## Latihan Cepat (25 menit)
-
-```bash
-# 1. Deploy & debug flow
-k3d cluster delete lab 2>/dev/null
-k3d cluster create lab --servers 1 --agents 2 --port 8080:80@loadbalancer
-kubectl create deployment web --image=nginx:alpine --replicas=3
-kubectl rollout status deploy/web
-
-# 2. Eksplor -o
-kubectl get pods -o wide
-kubectl get pods -o name
-kubectl get pods -o jsonpath='{.items[*].metadata.name}'
-
-# 3. Logs & exec
-kubectl logs deploy/web --tail=5
-kubectl exec -it deploy/web -- ls /usr/share/nginx/html
-
-# 4. Skenario error (ImagePullBackOff)
-kubectl create deployment bad --image=nginx:notexist
-kubectl get pod -l app=bad
-kubectl describe pod -l app=bad | tail -15     # Events: Failed to pull image
-kubectl delete deployment bad
-
-# 5. Skenario CrashLoop (command salah)
-kubectl create deployment crash --image=alpine -- sleep 1   # exit 0, Completed → CrashLoop? buat command yang error
-kubectl run crash --image=alpine --restart=Always -- /bin/false   # exit 1 → CrashLoopBackOff
-kubectl get pod crash
-kubectl logs crash --previous
-kubectl delete pod crash
-
-# 6. Top
-kubectl top nodes
-kubectl top pods
-```
-
-## Ringkasan
-
-| Mau... | Perintah |
-|---|---|
-| Lihat Pod | `kubectl get pods` (`-A`, `-o wide`, `-l label`) |
-| Cerita + events | `kubectl describe pod <name>` |
-| Log | `kubectl logs <pod>` (`--previous`, `-f`) |
-| Masuk | `kubectl exec -it <pod> -- sh` |
-| Forward port | `kubectl port-forward svc/<x> LOCAL:PORT` |
-| Resource | `kubectl top nodes/pods` |
-| Debug flow | get → describe (events) → logs → exec |
-| Status buruk | Pending / ImagePullBackOff / CrashLoopBackOff / OOMKilled (137) |
-
-## Cek Pemahaman
-
-1. Sebutkan urutan debug flow saat Pod `CrashLoopBackOff` (5 langkah).
-2. Pod status `ImagePullBackOff`. Sebut 3 kemungkinan penyebab & cara cek.
-3. Kenapa `kubectl logs --previous` penting saat container crash?
-4. Exit code 137 artinya apa? Penyebab umum?
-5. Beda `kubectl apply -f` (deklaratif) vs `kubectl create deployment` (imperatif) — mana yang seharusnya dipakai di production & kenapa?
-6. Pod production pakai image distroless (tanpa shell). Bagaimana Anda masuk untuk debug?
+---
+*Selamat! Kamu telah menguasai seluruh materi teori Modul 2.1. Sekarang saatnya menguji keahlianmu di laboratorium praktik sesungguhnya melalui [lab/LAB-01-pod-deployment-service.md](lab/LAB-01-pod-deployment-service.md) dan [lab/LAB-02-ingress-configmap-secret.md](lab/LAB-02-ingress-configmap-secret.md)!*
