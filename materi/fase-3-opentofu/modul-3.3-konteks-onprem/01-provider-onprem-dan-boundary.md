@@ -1,172 +1,262 @@
-# 01 — Provider On-Prem dan Boundary
+# 01 — Provider On-Premises dan Boundary Ownership: Mengorkestrasi Virtualisasi Tanpa Mengaburkan Tanggung Jawab
 
-> **Tujuan:** memahami provider sebagai adapter API, memilih boundary ownership, dan menghindari anggapan bahwa semua resource on-prem memiliki lifecycle yang sama.
+> **Ringkasan:** Di lingkungan cloud publik (AWS/GCP), abstraksi perangkat keras disembunyikan di balik antarmuka serba otomatis. Namun di lingkungan *on-premises* (bare-metal atau private data center), seorang Site Reliability Engineer (SRE) memegang kendali penuh atas seluruh lapisan tumpukan teknologi: mulai dari hypervisor, segmentasi VLAN, alokasi penyimpanan SAN/NFS, inisialisasi *first-boot* Cloud-Init, hingga konfigurasi sistem operasi. Dokumen ini membedah arsitektur provider on-premise (Proxmox, vSphere, libvirt, Cloud-Init), menetapkan matriks batasan tanggung jawab (*Boundary Ownership*), serta memitigasi risiko kegagalan provisioning di infrastruktur fisik.
 
-## Tujuan Belajar
+---
 
-- membedakan provider, resource, data source, CloudInit, dan Ansible;
-- membandingkan Proxmox, vSphere, libvirt, serta HTTP/REST secara konseptual;
-- menyusun provider version dan identity boundary;
-- mendokumentasikan ownership dan failure mode sebelum membuat resource.
+## 1. Analogi Pemula: Kontraktor Pembetonan vs Desainer Interior vs Pemilik Toko
 
-## 1. Provider Bukan Infrastruktur
+Salah satu kebingungan terbesar bagi engineer pemula saat beralih dari cloud publik ke bare-metal adalah mencampuradukkan peran alat:
+> *"Kenapa saya tidak menggunakan OpenTofu saja untuk menginstal package NGINX, mengedit file konfigurasi `/etc/nginx/nginx.conf`, dan menyetel firewall sekalian? Kenapa harus repot-repot memanggil Ansible?"*
 
-Provider menerjemahkan deklarasi OpenTofu ke API atau library tertentu. Provider bukan hypervisor, bukan backend state, dan bukan jaminan bahwa endpoint aman. Sebelum dipakai, verifikasi:
+Mari kita gunakan analogi pembangunan gedung pertokoan:
 
 ```text
-provider source dan versi
-provider/OpenTofu compatibility
-endpoint dan TLS/CA policy
-identity, permission, dan scope
-resource import/update/delete behavior
-retry, timeout, locking, dan failure semantics
-ARM64/provider binary availability
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 ANALOGI PEMISAHAN TANGGUNG JAWAB KONSTRUKSI                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  [ TAHAP 1: KONTRAKTOR PEMBETONAN BANGUNAN (OPENTOFU / PROVIDER) ]          │
+│  Tugas Mandor Pembetonan:                                                   │
+│  - Meratakan lahan tanah (Alokasi Resource Hypervisor).                     │
+│  - Mengecor pilar beton, dinding luar, dan lantai (Membuat Virtual Machine).│
+│  - Menyambungkan pipa air dan kabel listrik utama ke gardu kota             │
+│    (Memasang Kartu Jaringan Virtual NIC ke VLAN Bridge fisik).              │
+│                                                                             │
+│  [ TAHAP 2: JURU KUNCI GERBANG UTAMA (CLOUD-INIT / GUEST SEED) ]            │
+│  Tugas Petugas First-Boot:                                                  │
+│  - Memberikan nomor rumah sementara di plang depan (Set Hostname).          │
+│  - Menyerahkan kunci gembok pintu kepada pemilik sah (Inject SSH Key).      │
+│  - Memastikan listrik mengalir saat sakelar pertama kali ditekan            │
+│    (Inisialisasi DHCP / Static IP dasar).                                   │
+│                                                                             │
+│  [ TAHAP 3: DESAINER INTERIOR & TUKANG KAYU (ANSIBLE CONFIGURATION) ]       │
+│  Tugas Tukang Interior:                                                     │
+│  - Memasang wallpaper, karpet, dan rak display barang (Install Package OS). │
+│  - Mengatur tata letak meja kasir dan kunci brankas (Hardening & Config).   │
+│  - Memasang alarm anti-maling toko (Firewall UFW & Sysctl Security).        │
+│                                                                             │
+│  [ TAHAP 4: OPERASIONAL TOKO HARIAN (KUBERNETES K3S & DOCKER) ]             │
+│  Toko resmi dibuka untuk melayani transaksi ribuan pembeli harian!          │
+│                                                                             │
+│  BAHAYA FATAL JIKA TANGGUNG JAWAB DICAMPURADUKKAN:                          │
+│  Jika Anda menyuruh Mandor Pembetonan (OpenTofu) memasang wallpaper toko,   │
+│  ketika ada renovasi kecil pada pilar gedung, mandor akan MEROBOHKAN TEMBOK │
+│  beserta seluruh wallpaper dan barang dagangan di dalamnya (**ACCIDENTAL    │
+│  DESTRUCTION & DATA LOSS**)!                                                │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-`required_providers` harus dikunci sesuai policy organisasi. Jangan menyalin source atau versi dari contoh tanpa menguji checksum, compatibility, dan behavior provider.
+---
 
-## 2. Pilihan Provider On-Prem
+## 2. Realitas Data Center On-Premises: The Full Bare-Metal Stack
 
-| Pilihan | Cocok untuk | Hal yang harus diverifikasi | Batas contoh |
+Di lingkungan cloud publik (seperti AWS EKS), Anda dimanjakan oleh otomatisasi tak terlihat: VPC sudah memiliki gateway internet, EBS volume otomatis terpasang dengan satu baris kode, dan Load Balancer otomatis memiliki IP publik.
+
+Di lingkungan **On-Premises / Private Cloud**, tim SRE bertanggung jawab mengelola seluruh tumpukan teknologi dari bawah ke atas:
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       THE ON-PREMISES SRE TECH STACK                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  [ LAPISAN 5: APLIKASI & GITOPS ]   ──► ArgoCD, Helm, Traefik, MetalLB      │
+│  [ LAPISAN 4: CONTAINER ORCHESTRATION]► Kubernetes (k3s HA Cluster, etcd)   │
+│  [ LAPISAN 3: OS CONFIG & HARDENING]──► Ansible (SSH, sysctl, security)     │
+│  [ LAPISAN 2: VM & GUEST PROVISIONING]► OpenTofu + Cloud-Init               │
+│  [ LAPISAN 1: HYPERVISOR & HARDWARE]──► Proxmox VE / VMware vSphere / KVM   │
+│  [ LAPISAN 0: PHYSICAL NETWORK & SAN]─► Switch ToR L2/L3, BGP, NFS/Ceph     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+Untuk mengorkestrasi Lapisan 2 (VM Provisioning) di atas perangkat keras Lapisan 1, OpenTofu membutuhkan **Provider Plugin On-Premises**.
+
+---
+
+## 3. Peta Provider On-Premises Utama
+
+Berikut adalah perbandingan 5 adapter provider yang paling umum digunakan untuk mengelola infrastruktur lokal dan data center privat:
+
+| Provider Plugin | Ekosistem Target | Karakteristik & Mekanisme Kerja | Batasan & Pertimbangan SRE |
 |---|---|---|---|
-| Proxmox provider | VM, template, storage, network pada Proxmox | provider source/version, API endpoint, node/storage mapping, clone semantics, permission | provider dan endpoint tidak tersedia otomatis di Mac |
-| vSphere provider | VM/template/network pada vCenter/ESXi | vCenter version, datastore/portgroup, guest customization, permission, provider compatibility | bukan pengganti API vSphere atau capacity planning |
-| libvirt provider | VM/QEMU/KVM dan network/storage libvirt | libvirt daemon, qemu architecture, image format, host capability, provider behavior | Apple Silicon/OrbStack tidak otomatis menyediakan KVM/libvirt |
-| CloudInit | first-boot seed untuk hostname/user/package minimum | image support, datasource, ordering, idempotency, secret exposure, console evidence | CloudInit bukan provider dan bukan configuration management penuh |
-| HTTP/REST | API internal yang tidak memiliki provider khusus | auth chain, TLS, schema, idempotency, retry, pagination, delete semantics, audit | HTTP read success tidak membuktikan resource lifecycle |
+| **Proxmox VE Provider** (`bpg/proxmox` / `telmate`) | Proxmox Virtual Environment (KVM + LXC) | Berkomunikasi via Proxmox REST API port 8006. Mengkloning VM dari template Cloud-Init, mengatur disk VirtIO, dan binding ke Linux bridge (`vmbr0`). | Membutuhkan API Token bertaraf PVE Administrator atau custom RBAC role. Sangat populer untuk homelab dan enterprise tier-2. |
+| **VMware vSphere Provider** (`hashicorp/vsphere`) | VMware ESXi & vCenter Server | Berkomunikasi via vSphere Web Services API. Mendukung datastore cluster, DRS anti-affinity rules, dan distributed virtual switches (vDS). | Membutuhkan lisensi komersial VMware vCenter. Standar de facto industri perbankan dan enterprise tier-1. |
+| **Libvirt Provider** (`dmacvicar/libvirt`) | Linux KVM / QEMU Murni | Berkomunikasi langsung ke daemon `libvirtd` lokal via Unix socket (`/var/run/libvirt/libvirt-sock`) atau remote SSH. Sangat ringan tanpa GUI. | Tidak tersedia secara native di macOS Apple Silicon tanpa lapisan virtualisasi Linux perantara. |
+| **Cloud-Init Provider / Template** | Inisialisasi OS Linux Guest (Ubuntu, Debian, RHEL) | Menyuntikkan file konfigurasi `#cloud-config` ke dalam disk virtual CD-ROM virtual (NoCloud) yang dibaca kernel saat *first boot*. | **Bukan alat konfigurasi harian.** Hanya bertugas menyalakan SSH, mengatur hostname, dan static IP awal. |
+| **Generic HTTP / REST Provider** | IPAM & DCIM Internal (NetBox, phpIPAM) | Melakukan kueri HTTP GET/POST ke sistem inventaris data center untuk memesan alamat IP kosong sebelum VM dinyalakan. | Menjamin tidak terjadi tabrakan alamat IP (*IP Collision*) di jaringan fisik kantor. |
 
-Nama provider dan capability harus dipastikan dari dokumentasi versi yang benar-benar digunakan. OpenTofu compatibility tidak boleh diasumsikan hanya karena contoh Terraform terlihat serupa.
+---
 
-## 3. Root Module Mengendalikan Provider
+## 4. Matriks Batasan Tanggung Jawab (The Boundary Ownership Matrix)
 
-Provider configuration sebaiknya berada di root module/environment. Child module menerima provider melalui caller sehingga endpoint dan identity tidak dipilih diam-diam oleh module.
+Prinsip utama SRE dalam merancang arsitektur IaC adalah **Strict Separation of Concerns**. Setiap alat hanya boleh memiliki wewenang pada domainnya sendiri:
+
+```text
+┌─────────────────────┬────────────────────────────────────┬──────────────────────────────────┐
+│ Komponen / Alat     │ TANGGUNG JAWAB MUTLAK              │ DILARANG KERAS MENGERJAKAN       │
+├─────────────────────┼────────────────────────────────────┼──────────────────────────────────┤
+│ **OpenTofu**        │ - Alokasi vCPU, RAM, dan Ukuran Disk│ - Menginstal package software OS │
+│ (Provisioner)       │ - Memilih Target Storage & Node Host│ - Mengedit file konfigurasi app  │
+│                     │ - Memasang Virtual NIC ke VLAN ID  │ - Mengelola user/password lokal  │
+│                     │ - Mengeluarkan Metadata IP/Hostname│ - Menjalankan instalasi k3s      │
+├─────────────────────┼────────────────────────────────────┼──────────────────────────────────┤
+│ **Cloud-Init**      │ - Menyetel Hostname saat boot awal │ - Manajemen konfigurasi jangka   │
+│ (Guest Seed)        │ - Menaruh SSH Public Key operator  │   panjang / pembaruan harian     │
+│                     │ - Menyetel static IP / DHCP client │ - Menjalankan script berat       │
+├─────────────────────┼────────────────────────────────────┼──────────────────────────────────┤
+│ **Ansible**         │ - OS Hardening & Security Baseline │ - Mengubah ukuran partisi disk   │
+│ (Config Management) │ - Konfigurasi Firewall & Sysctl    │   fisik di tingkat hypervisor    │
+│                     │ - Instalasi Prasyarat Containerd   │ - Menggantikan fungsi remote     │
+│                     │ - Instalasi & Bootstrap Kluster k3s│   state backend OpenTofu         │
+├─────────────────────┼────────────────────────────────────┼──────────────────────────────────┤
+│ **Kubernetes k3s**  │ - Manajemen Siklus Hidup Pod & App │ - Mengelola mesin virtual host   │
+│ (Orchestrator)      │ - Service Discovery, DNS Internal  │ - Mengonfigurasi interface fisik │
+│                     │ - Integrasi VIP MetalLB (L2/BGP)   │   kabel jaringan data center     │
+└─────────────────────┴────────────────────────────────────┴──────────────────────────────────┘
+```
+
+---
+
+## 5. Menghindari Bencana: Pola Konfigurasi Provider di Root Module
+
+Mengapa kita harus mengonfigurasi provider di *Root Module* dan bukan di *Child Module*? Karena di lingkungan on-premises, kredensial dan endpoint hypervisor berbeda antara kluster lab dan kluster produksi.
+
+### Contoh Pola Arsitektur HCL yang Bersih (`environments/prod/providers.tf`):
 
 ```hcl
 terraform {
   required_version = ">= 1.6.0"
 
   required_providers {
-    onprem = {
-      # Illustrative only: pilih source dan versi setelah compatibility review.
-      source  = "example.invalid/onprem/provider"
-      version = "~> 1.0"
+    # Contoh deklarasi provider Proxmox resmi
+    proxmox = {
+      source  = "bpg/proxmox"
+      version = "~> 0.60.0"
     }
   }
 }
 
-provider "onprem" {
-  endpoint = var.api_endpoint
-  # Identity berasal dari credential chain yang disetujui; bukan literal di HCL.
-}
+# Provider dikonfigurasi HANYA di Root Module
+provider "proxmox" {
+  # Endpoint API Proxmox VE Data Center
+  endpoint = var.proxmox_api_endpoint
 
-module "host" {
-  source = "../../modules/onprem-host"
+  # Kredensial dibaca dari Environment Variable (BUKAN HARDCODED!):
+  # PROXMOX_VE_USERNAME dan PROXMOX_VE_API_TOKEN
+  insecure = false # Wajib true hanya jika menggunakan sertifikat SSL valid
 
-  providers = {
-    onprem = onprem
+  ssh {
+    agent    = true
+    username = "root"
   }
-
-  name        = var.host_name
-  environment = var.environment
-  image       = var.image_reference
 }
 ```
 
-`example.invalid` menandakan placeholder dan bukan provider yang dapat di-install. Jangan menjalankan snippet tersebut sebagai bukti provider nyata.
-
-Provider alias dipakai jika satu root module perlu dua context yang memang disetujui, misalnya management dan workload:
-
+### Memanggil Child Module On-Premises:
 ```hcl
-provider "onprem" {
-  alias    = "management"
-  endpoint = var.management_endpoint
-}
+module "k3s_master_nodes" {
+  source = "../../modules/proxmox-vm"
 
-module "inventory" {
-  source = "../../modules/inventory"
+  for_each = var.master_nodes_topology
 
-  providers = {
-    onprem = onprem.management
-  }
+  vm_name     = each.key
+  node_target = each.value.target_pve_node # Node Proxmox fisik (e.g. pve-01, pve-02)
+  cores       = each.value.cores
+  memory_mb   = each.value.memory
+  disk_gb     = each.value.disk_size
+  vlan_id     = var.management_vlan_id
 
-  environment = var.environment
-}
-```
-
-Alias bukan security boundary otomatis. Endpoint, identity, permission, backend key, dan plan target tetap harus diperiksa.
-
-## 4. Resource, Data Source, dan Ownership
-
-Resource berarti module memiliki lifecycle object tersebut. Data source membaca object yang dimiliki boundary lain. Contoh konseptual:
-
-```hcl
-data "onprem_network" "workload" {
-  name = var.shared_network_name
-}
-
-resource "onprem_vm" "this" {
-  name       = var.name
-  network_id = data.onprem_network.workload.id
-  image      = var.image_reference
+  # Meneruskan data Cloud-Init untuk first-boot
+  cloud_init_user_data = templatefile("${path.module}/templates/user-data.yaml.tftpl", {
+    hostname       = each.key
+    ssh_public_key = var.operator_ssh_public_key
+  })
 }
 ```
 
-Sebelum memakai data source, dokumentasikan owner network, identifier stability, permission read, availability, dan failure mode bila network hilang. Jangan memakai data source untuk menyamarkan ownership yang seharusnya berada pada project.
+---
 
-## 5. CloudInit sebagai Guest Initialization
+## 6. Anatomi Guest Initialization: Cloud-Init Non-Secret
 
-CloudInit sering dipakai untuk first boot:
+File Cloud-Init adalah lembaran instruksi pertama yang dibaca oleh sistem operasi Linux saat mesin virtual pertama kali dinyalakan.
+
+### Template Bersih: `templates/user-data.yaml.tftpl`
+Perhatikan bagaimana template ini dirancang secara higienis tanpa menyimpan password:
 
 ```yaml
-# Contoh non-secret; jangan menaruh password, token, private key, atau kubeconfig.
 #cloud-config
-hostname: sre-node-placeholder
-package_update: false
+# INI ADALAH TEMPLATE NON-SECRET GUEST SEED
+hostname: ${hostname}
+fqdn: ${hostname}.sre.internal
+manage_etc_hosts: true
+
+# Buat user operator non-root untuk Ansible
+users:
+  - name: sre-operator
+    gecos: SRE Automation User
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true # Kunci password! Login HANYA boleh menggunakan SSH Key!
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+# Paket dasar minimal yang dibutuhkan untuk handoff ke Ansible
 packages:
   - curl
   - ca-certificates
+  - qemu-guest-agent
+  - python3
+
+# Pastikan qemu-guest-agent langsung berjalan agar IP VM terlapor ke OpenTofu
 runcmd:
-  - [ sh, -c, "printf '%s\\n' 'cloud-init marker' > /var/lib/sre-bootstrap-marker" ]
+  - [ systemctl, enable, --now, qemu-guest-agent ]
 ```
 
-Sebelum dipakai, verifikasi apakah image mendukung CloudInit, datasource yang digunakan, urutan network, console/log exposure, dan perilaku saat instance reboot. User-data dapat masuk metadata, state, log, atau backup; perlakukan sebagai data sensitif bila berisi credential.
+> [!TIP]
+> **Mengapa `qemu-guest-agent` Sangat Krusial?**
+> Tanpa *QEMU Guest Agent* di dalam VM, hypervisor Proxmox tidak akan bisa mengetahui berapa alamat IP yang diperoleh VM dari DHCP. Akibatnya, OpenTofu akan mengalami *timeout* saat mencoba membaca atribut `ip_address` untuk diekspor ke Ansible!
 
-## 6. Boundary dan Failure Mode
+---
 
-| Boundary | Owner | Contoh failure | Stop condition |
+## 7. Pola Kegagalan (Failure Modes) & Panduan Diagnosa
+
+| Gejala Masalah | Titik Investigasi | Penyebab Akar (*Root Cause*) | Solusi Pemulihan SRE |
 |---|---|---|---|
-| API provider | platform/IaC | timeout, permission, schema mismatch | jangan retry mutasi tanpa mengetahui status remote |
-| VM/network/storage | virtualization team | resource penuh, IP collision, datastore unavailable | hentikan apply dan cek object/provider state |
-| guest init | OS/platform | CloudInit gagal atau image tidak cocok | jangan lanjut bootstrap sebelum console/readiness check |
-| configuration | Ansible owner | package/service/hardening gagal | batasi host, kumpulkan check mode/evidence |
-| k3s | cluster owner | token/version/network/quorum issue | ikuti runbook k3s, jangan reset cluster aktif |
+| `Error: Timeout waiting for VM IP address` | `tofu apply` pada pembuatan VM | Qemu Guest Agent belum terpasang di base image, atau DHCP server lokal lambat membagikan IP. | Pastikan base template memiliki `qemu-guest-agent` atau gunakan konfigurasi IP statis pada Cloud-Init. |
+| `Plan ingin me-replace seluruh VM (-/+)` | `tofu plan` pasca edit template | Mengubah nama template induk atau ID storage datastore yang bersifat `ForceNew`. | Teliti output plan. Jangan apply perubahan template induk pada VM yang sedang berjalan di produksi. |
+| `Error: 401 Unauthorized / Ticket expired` | Komunikasi provider ke API hypervisor | Token API Proxmox atau vCenter kedaluwarsa atau jam sistem mengalami pergeseran (*clock skew*). | Sinkronkan waktu server dengan NTP/chrony dan terbitkan ulang token API baru. |
+| `Ansible gagal SSH setelah VM selesai dibuat` | Port 22 SSH pada target VM | Cloud-Init belum selesai mengeksekusi penambahan user saat Ansible pertama kali mencoba masuk. | Tambahkan *wait-for-ssh readiness gate* di skrip pipeline sebelum memanggil Ansible playbook. |
 
-### Provider `apply` timeout
+---
 
-Jangan langsung menjalankan apply ulang. Periksa task/job pada hypervisor, object inventory, provider log yang telah diredáksi, dan state. Jika object sudah dibuat tetapi state belum tersimpan, lakukan recovery/import hanya dengan prosedur terverifikasi, backup, lock, dan approval.
+## 8. Ringkasan Praktis & Cheatsheet Provider On-Premises
 
-### Provider menghapus resource saat input berubah
+```bash
+# 1. Memeriksa daftar provider yang dibutuhkan dan versinya
+tofu providers
 
-Baca `plan` dan `replace` action. Pastikan perubahan template, disk, network, atau name memang diizinkan. Jangan memakai `-target` sebagai cara permanen untuk menyembunyikan dependency atau replacement.
+# 2. Mengekspor kredensial provider secara aman via environment variable
+export PROXMOX_VE_API_TOKEN="USER@REALM!TOKENID=UUID..."
 
-### Endpoint atau identity salah
+# 3. Memeriksa apakah template Cloud-Init bebas dari sintaks error sebelum apply
+cloud-init schema --config-file user-data.yaml
 
-Stop sebelum mutation. Periksa directory, backend key, provider alias, endpoint, identity context, dan environment allowlist. Jangan mencetak credential saat debugging.
+# 4. Melakukan refresh status fisik VM dari hypervisor tanpa mengubah apa pun
+tofu apply -refresh-only
+```
 
-## Acceptance Checklist
+---
 
-- [ ] Provider dipilih berdasarkan API, version, identity, resource behavior, dan failure mode.
-- [ ] CloudInit dijelaskan sebagai guest initialization, bukan provider atau pengganti Ansible.
-- [ ] Root module mengendalikan provider; child module tidak memilih endpoint production secara tersembunyi.
-- [ ] Resource ownership dan data source boundary terdokumentasi.
-- [ ] Semua contoh credential-free dan placeholder diberi label.
-- [ ] Provider/runtime yang belum diuji ditandai belum diverifikasi.
+## 9. Cek Pemahaman Mandiri
 
-## Catatan SRE
+1. Jelaskan mengapa seorang engineer SRE dilarang keras menggunakan OpenTofu untuk menginstal package sistem operasi (seperti `apt-get install nginx`) atau mengonfigurasi file aplikasi di dalam server produksi!
+2. Apa fungsi utama dari teknologi *Cloud-Init* dalam arsitektur provisioning bare-metal on-premises? Di titik manakah tanggung jawab Cloud-Init berakhir dan tanggung jawab Ansible dimulai?
+3. Mengapa komponen *QEMU Guest Agent* (atau VMware Tools) mutlak wajib berjalan di dalam sistem operasi mesin virtual saat diorkestrasi oleh OpenTofu? Apa dampaknya terhadap atribut output jika agen ini mati?
+4. Mengapa konfigurasi endpoint API dan token autentikasi hypervisor HANYA boleh diletakkan di dalam *Root Module* dan DILARANG KERAS diletakkan di dalam *Child Module*?
+5. Jelaskan risiko yang terjadi jika template mesin virtual dasar (*golden template*) di hypervisor diperbarui versinya, sementara OpenTofu dikonfigurasi untuk mereferensikan template tersebut secara dinamis!
 
-Provider adalah komponen control plane. Bug atau ketidakcocokan provider dapat membuat plan terlihat valid tetapi gagal pada API, atau lebih buruk: mengubah object yang salah. Pin versi, review plan, batasi identity, dan uji failure semantics pada resource disposable sebelum memperluas scope.
+---
 
-## Kaitan dengan Modul Berikutnya
-
-- [02 — Simulasi Lokal](02-simulasi-lokal-docker-libvirt-mock.md) membatasi apa yang dapat dibuktikan Docker/libvirt/mock.
-- [03 — OpenTofu, Ansible, dan k3s](03-opentofu-ansible-k3s-handoff.md) meneruskan metadata non-secret ke boundary berikutnya.
+*Langkah Selanjutnya:* Masuk ke [02 — Simulasi Lokal: Docker, libvirt, dan Mock](file:///Users/muzma/Developer/repos/it-oss/training/BootcampSRE/materi/fase-3-opentofu/modul-3.3-konteks-onprem/02-simulasi-lokal-docker-libvirt-mock.md) untuk mempelajari bagaimana melakukan simulasi arsitektur provisioning on-premise secara cepat, aman, dan hemat biaya di atas laptop Mac Apple Silicon Anda.
