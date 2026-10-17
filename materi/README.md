@@ -46,7 +46,19 @@ materi/
 │   │   └── evaluasi/
 │   │       ├── latihan.md
 │   │       └── kuis-dan-jawaban.md
-│   └── (modul-0.3 selesai — Fase 0 lengkap)
+│   ├── modul-0.4-pemrograman-sre/   ✅ tersedia
+│   │   ├── README.md                ← panduan modul & rencana 3 hari (Python & Go)
+│   │   ├── 01-kapan-bash-vs-python-vs-go.md
+│   │   ├── 02-python-dasar-json-yaml-cli.md
+│   │   ├── 03-python-http-api-automation.md
+│   │   ├── 04-go-microservice-dasar.md
+│   │   ├── lab/
+│   │   │   ├── LAB-01-script-audit-api.md
+│   │   │   └── LAB-02-http-service-health.md
+│   │   └── evaluasi/
+│   │       ├── latihan.md
+│   │       └── kuis-dan-jawaban.md
+│   └── (modul-0.4 selesai — Fase 0 lengkap)
 ├── fase-1-container-orbstack/
 │   ├── README.md                    ← overview fase
 │   ├── modul-1.1-container-fundamental/   ✅ tersedia

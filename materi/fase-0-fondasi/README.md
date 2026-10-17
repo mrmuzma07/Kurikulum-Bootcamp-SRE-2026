@@ -1,6 +1,6 @@
 # Fase 0 — Fondasi
 
-> **Tujuan fase:** memiliki landasan Linux, networking, dan Git yang cukup kuat untuk tidak tersesat di fase berikutnya.
+> **Tujuan fase:** memiliki landasan Linux, networking, Git, dan pemrograman dasar SRE (Python & Go) yang cukup kuat untuk tidak tersesat di fase berikutnya.
 
 ## Durasi
 Minggu 1–2
@@ -9,9 +9,10 @@ Minggu 1–2
 
 | # | Modul | Durasi | Status |
 |---|---|---|---|
-| 0.1 | Linux & Shell | 5 hari | ✅ Tersedia |
-| 0.2 | Networking untuk SRE | 3 hari | ✅ Tersedia |
-| 0.3 | Git & Kolaborasi | 2 hari | ✅ Tersedia |
+| 0.1 | [Linux & Shell](modul-0.1-linux-shell/README.md) | 5 hari | ✅ Tersedia |
+| 0.2 | [Networking untuk SRE](modul-0.2-networking/README.md) | 3 hari | ✅ Tersedia |
+| 0.3 | [Git & Kolaborasi](modul-0.3-git/README.md) | 2 hari | ✅ Tersedia |
+| 0.4 | [Pemrograman untuk SRE (Python & Go Dasar)](modul-0.4-pemrograman-sre/README.md) | 3 hari | ✅ Tersedia |
 
 ## Capaian Fase (Wajib)
 
@@ -20,6 +21,7 @@ Minggu 1–2
 - [ ] Bisa membuat VM Linux lewat OrbStack dan mengaksesnya via SSH
 - [ ] Bisa menjelaskan konsep DNS, TCP/UDP, firewall secara singkat
 - [ ] Bisa bekerja dengan branch, MR, dan conflict di GitLab
+- [ ] Bisa menulis skrip Python untuk mengolah JSON/YAML & memanggil HTTP API, serta mem-build service HTTP Go sederhana (`/healthz`, `/readyz`, `/metrics`)
 
 ## Cara Belajar
 
