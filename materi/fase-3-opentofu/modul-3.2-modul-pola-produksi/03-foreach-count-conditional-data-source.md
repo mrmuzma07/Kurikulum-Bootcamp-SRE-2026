@@ -1,258 +1,348 @@
-# 03 — `for_each`, `count`, Conditional, dan Data Source
+# 03 — Pola Instansiasi: `for_each`, `count`, Conditional, dan Data Source
 
-> **Tujuan:** memilih pola instansiasi yang stabil dan memahami kapan OpenTofu memiliki ownership terhadap object.
+> **Ringkasan:** Membuat banyak sumber daya infrastruktur yang serupa (*multi-instance resources*) adalah kebutuhan umum dalam perancangan arsitektur modern. Namun, salah memilih antara konstruksi `count` dan `for_each` dapat berakibat fatal: seluruh server produksi Anda dapat terhapus dan dibangun ulang tanpa sengaja akibat fenomena pergeseran indeks (*Index Churn*). Dokumen ini membedah mekanisme penentuan alamat resource di dalam state, menyusun logika kondisional bersyarat (*feature toggle*) yang aman, memahami batas kepemilikan data read-only (*Data Source*), hingga menulis validasi koleksi data tingkat lanjut.
 
-## Tujuan Belajar
+---
 
-Peserta dapat:
+## 1. Analogi Pemula: Nomor Antrean Kursi Bioskop vs Tiket Bernama KTP
 
-- memilih collection type yang tepat;
-- menjelaskan address `for_each` dan `count`;
-- mencegah address churn akibat rename key atau perubahan index;
-- memakai conditional secara eksplisit;
-- membedakan resource ownership dengan data source read-only.
-
-## 1. `for_each` untuk Key yang Stabil
-
-Gunakan `for_each` ketika instance memiliki identitas bisnis yang bermakna. Map key menjadi bagian address dan sebaiknya tidak berubah tanpa alasan.
-
-```hcl
-variable "web_instances" {
-  description = "Instance web disposable dengan key bisnis stabil."
-  type = map(object({
-    host_port = number
-    image     = string
-  }))
-
-  validation {
-    condition     = alltrue([for key in keys(var.web_instances) : can(regex("^[a-z0-9][a-z0-9-]{0,30}$", key))])
-    error_message = "Key instance harus lowercase dan stabil."
-  }
-}
-
-module "web" {
-  source   = "../../modules/web-server"
-  for_each = var.web_instances
-
-  name        = "sre-${each.key}"
-  image       = each.value.image
-  host_port   = each.value.host_port
-  environment = var.environment
-}
-
-output "web_urls" {
-  value = {
-    for key, instance in module.web : key => instance.http_url
-  }
-}
-```
-
-Address yang dihasilkan:
+Untuk memahami perbedaan paling mendasar antara `count` dan `for_each`, bayangkan dua sistem reservasi tiket:
 
 ```text
-module.web["public"].docker_container.this
-module.web["admin"].docker_container.this
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 ANALOGI SISTEM TIKET: COUNT VS FOR_EACH                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  [ METODE COUNT: NOMOR URUT KURSI BIOSKOP (ARRAY INDEX [0], [1], [2]) ]     │
+│  Tiga orang sahabat memesan kursi di bioskop:                               │
+│  - Kursi [0] diduduki oleh Ali.                                             │
+│  - Kursi [1] diduduki oleh Budi.                                            │
+│  - Kursi [2] diduduki oleh Citra.                                           │
+│                                                                             │
+│  Tiba-tiba Ali sakit perut dan membatalkan tiketnya (Ali dihapus).          │
+│  Apa yang terjadi pada sistem antrean nomor kursi?                          │
+│  - Petugas bioskop menyuruh Budi PINDAH DUDUK ke Kursi [0].                 │
+│  - Petugas menyuruh Citra PINDAH DUDUK ke Kursi [1].                        │
+│  - Kursi [2] dihancurkan/dihapus.                                           │
+│                                                                             │
+│  BENCANA DI OPENTOFU: Karena alamat Budi dan Citra berubah indeks,         │
+│  OpenTofu akan MENGHANCURKAN server Budi dan Citra lalu membangunnya ulang  │
+│  dari awal (**INDEX CHURN / DESTROY AND RECREATE**) hanya karena Ali pergi! │
+│                                                                             │
+│  [ METODE FOR_EACH: TIKET RESERVASI BERNAMA IDENTITAS (MAP KEYS) ]          │
+│  Setiap tiket dicetak dengan Nama KTP pemesan yang permanen:                │
+│  - Kursi["ali"] diduduki oleh Ali.                                          │
+│  - Kursi["budi"] diduduki oleh Budi.                                        │
+│  - Kursi["citra"] diduduki oleh Citra.                                      │
+│                                                                             │
+│  Ketika Ali membatalkan tiketnya:                                           │
+│  - Hanya Kursi["ali"] yang dihapus secara terisolasi.                       │
+│  - Budi dan Citra tetap duduk tenang di kursinya tanpa terganggu sedikit pun│
+│    karena alamat identitas mereka TIDAK PERNAH BERUBAH (**ZERO DOWNTIME**)! │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Mengganti key `public` menjadi `frontend` bukan rename kosmetik. OpenTofu dapat melihat destroy `public` dan create `frontend`, kecuali perpindahan address direncanakan dan disetujui menggunakan mekanisme state yang tepat. Jangan mengandalkan `state mv` tanpa backup dan plan.
+---
 
-## 2. `count` untuk Instance Homogen
+## 2. Bedah Teknis `count`: Karakteristik & Bahaya "Index Churn"
 
-`count` cocok ketika instance benar-benar identik dan identitas index dapat diterima.
+`count` adalah metode perulangan paling sederhana di OpenTofu. `count` menerima nilai integer dan menghasilkan alamat resource berbasis indeks array angka: `[0]`, `[1]`, `[2]`, dan seterusnya.
 
+### Contoh Implementasi `count`:
 ```hcl
-resource "docker_container" "worker" {
-  count = var.worker_count
+variable "server_names" {
+  type    = list(string)
+  default = ["frontend", "backend", "database"]
+}
 
-  name  = "sre-worker-${count.index}"
-  image = var.worker_image
+resource "docker_container" "app" {
+  count = length(var.server_names)
 
-  labels {
-    label = "managed_by"
-    value = "opentofu"
-  }
+  name  = "sre-${var.server_names[count.index]}"
+  image = "nginx:1.27.4-alpine"
 }
 ```
 
-Address berbentuk `docker_container.worker[0]`, `[1]`, dan seterusnya. Menghapus item di tengah list dapat menggeser index dan menyebabkan replacement pada instance lain. Jika instance memiliki nama, role, port, atau lifecycle berbeda, pilih `for_each` dengan map.
+Alamat resource yang dicatat di dalam file `terraform.tfstate`:
+- `docker_container.app[0]` ──► memetakan ke kontainer `"sre-frontend"`
+- `docker_container.app[1]` ──► memetakan ke kontainer `"sre-backend"`
+- `docker_container.app[2]` ──► memetakan ke kontainer `"sre-database"`
 
-Validation count:
+---
 
+### Bencana Kasus Nyata: Jebakan Index Churn (The Shift-and-Destroy Trap)
+Suatu hari, Anda memutuskan untuk menghapus komponen `"frontend"` dari list variabel, sehingga variabel Anda menjadi:
 ```hcl
-variable "worker_count" {
-  type    = number
-  default = 2
-
-  validation {
-    condition     = var.worker_count >= 0 && var.worker_count <= 5
-    error_message = "worker_count lab harus berada pada 0 sampai 5."
-  }
+variable "server_names" {
+  type    = list(string)
+  default = ["backend", "database"] # "frontend" dihapus dari indeks 0!
 }
 ```
 
-Jangan memakai `count = var.enabled ? 1 : 0` untuk menyembunyikan perubahan berbahaya tanpa menjelaskan bahwa `false` menghapus resource. Conditional adalah keputusan lifecycle.
+Ketika Anda menjalankan `tofu plan`, inilah bencana yang akan terjadi:
 
-## 3. Conditional Resource
+```text
+OpenTofu will perform the following actions:
 
-Conditional dapat dibuat melalui `for_each` pada map kosong atau `count` 0/1. Pilih pola yang membuat address dan plan mudah dibaca.
+  # docker_container.app[0] must be replaced (-/+)
+  ~ name: "sre-frontend" => "sre-backend" (forces new resource!)
+
+  # docker_container.app[1] must be replaced (-/+)
+  ~ name: "sre-backend" => "sre-database" (forces new resource!)
+
+  # docker_container.app[2] will be destroyed (-)
+  - resource "docker_container" "app" {}
+
+Plan: 2 to add, 0 to change, 3 to destroy.
+```
+
+> [!CAUTION]
+> **Mengapa Ini Terjadi?**
+> Karena indeks array bergeser! OpenTofu melihat bahwa `app[0]` yang tadinya bernama `frontend` kini diubah namanya menjadi `backend`. Karena nama kontainer bersifat `ForceNew`, OpenTofu **MENGHANCURKAN kontainer backend yang sedang melayani transaksi live**, menghancurkan database, dan mematikan seluruh sistem produksi Anda!
+
+### Kapan `count` Boleh Digunakan Secara Aman?
+Gunakan `count` **HANYA** untuk dua kondisi berikut:
+1. **Kumpulan Server yang 100% Homogen:** Kumpulan instans worker tanpa nama khusus dan tanpa IP tetap (misalnya: `count = 5` untuk membuat 5 worker pool identik di mana penambahan atau pengurangan hanya terjadi di elemen paling akhir).
+2. **Kondisional Boolean On/Off (`0` atau `1`):** Untuk mengaktifkan atau menonaktifkan satu resource tunggal (`count = var.enable_feature ? 1 : 0`).
+
+---
+
+## 3. `for_each`: Standar Emas Instansiasi Multi-Resource
+
+Untuk seluruh resource yang memiliki nama, port, subnet, atau fungsi bisnis yang unik, **`for_each` adalah standar wajib industri SRE**.
+
+`for_each` menerima input berupa struktur data **`map`** atau **`set of strings`**. Alamat resource di dalam state tidak lagi menggunakan angka indeks, melainkan menggunakan kunci (*keys*) bisnis yang stabil.
+
+### Contoh Implementasi `for_each` Standar Enterprise:
 
 ```hcl
-variable "enable_probe" {
-  description = "Buat probe HTTP disposable."
+variable "web_services" {
+  description = "Daftar layanan web dengan spesifikasi unik per komponen."
+  type = map(object({
+    container_name = string
+    host_port      = number
+    image_tag      = string
+  }))
+  default = {
+    frontend = {
+      container_name = "sre-prod-ui"
+      host_port      = 18080
+      image_tag      = "1.27.4-alpine"
+    }
+    api = {
+      container_name = "sre-prod-api"
+      host_port      = 18081
+      image_tag      = "1.27.4-alpine"
+    }
+    metrics = {
+      container_name = "sre-prod-metrics"
+      host_port      = 18082
+      image_tag      = "1.27.4-alpine"
+    }
+  }
+}
+
+# Memanggil modul menggunakan for_each
+module "web_cluster" {
+  source   = "../../modules/web-server"
+  for_each = var.web_services
+
+  # each.key   = "frontend", "api", "metrics"
+  # each.value = objek data di dalam map
+  container_name = each.value.container_name
+  host_port      = each.value.host_port
+  image_tag      = each.value.image_tag
+  environment    = "prod"
+}
+```
+
+Alamat resource yang dicatat di dalam state:
+- `module.web_cluster["frontend"].docker_container.this`
+- `module.web_cluster["api"].docker_container.this`
+- `module.web_cluster["metrics"].docker_container.this`
+
+### Apa yang Terjadi Jika Layanan `frontend` Dihapus?
+Jika Anda menghapus key `"frontend"` dari map variabel, OpenTofu akan membaca diff secara terisolasi:
+
+```text
+Plan: 0 to add, 0 to change, 1 to destroy.
+
+- module.web_cluster["frontend"].docker_container.this will be destroyed
+```
+Layanan `api` dan `metrics` **sama sekali tidak tersentuh dan tidak mengalami restart sedikit pun**! Inilah keunggulan stabilitas mutlak dari `for_each`.
+
+---
+
+## 4. Pola Logika Kondisional (Conditional Resources)
+
+Di dalam HCL, kita sering kali perlu menyalakan atau mematikan resource tertentu berdasarkan lingkungan (misalnya: membuat kontainer monitoring hanya di lingkungan `staging` dan `prod`, tetapi dinonaktifkan di `dev` untuk menghemat RAM laptop).
+
+OpenTofu menggunakan **Ternary Operator**:
+`kondisi ? nilai_jika_true : nilai_jika_false`
+
+### 1. Pola Kondisional Menggunakan `count` (Toggle On/Off Sederhana)
+```hcl
+variable "enable_monitoring_agent" {
+  description = "Saklar untuk menyalakan agen pemantau metrik."
   type        = bool
   default     = true
 }
 
-resource "docker_container" "probe" {
-  count = var.enable_probe ? 1 : 0
+resource "docker_container" "prometheus_node_exporter" {
+  # Jika true buat 1 instans; jika false buat 0 instans (tidak dibuat sama sekali!)
+  count = var.enable_monitoring_agent ? 1 : 0
 
-  name  = "sre-${var.environment}-probe"
-  image = var.probe_image
+  name  = "sre-node-exporter"
+  image = "prom/node-exporter:v1.8.2"
 
-  depends_on = [module.web]
-}
-
-output "probe_name" {
-  value     = var.enable_probe ? docker_container.probe[0].name : null
-  sensitive = false
-}
-```
-
-Jika conditional membungkus module atau resource yang output-nya dipakai banyak tempat, pastikan caller menangani `null`/empty collection. Jangan memakai conditional untuk memilih credential atau endpoint secara diam-diam; environment boundary harus eksplisit.
-
-Alternatif map untuk address bernama:
-
-```hcl
-resource "docker_container" "probe" {
-  for_each = var.enable_probe ? { http = true } : {}
-
-  name  = "sre-${var.environment}-probe"
-  image = var.probe_image
-}
-```
-
-## 4. Data Source dan Ownership
-
-`data` membaca object yang dikelola boundary lain. Ia tidak memberikan ownership untuk update/delete.
-
-```hcl
-data "docker_network" "shared" {
-  name = var.shared_network_name
-}
-
-resource "docker_container" "web" {
-  name  = var.name
-  image = var.image
-
-  networks_advanced {
-    name = data.docker_network.shared.name
+  ports {
+    internal = 9100
+    external = 19100
   }
 }
 ```
 
-Sebelum memakai data source, dokumentasikan:
+### 2. Cara Aman Menangkap Output dari Resource Kondisional
+Sering kali pemula menulis output seperti ini:
+```hcl
+# CONTOH SALAH (AKAN CRASH JIKA MONITORING MATI!):
+output "exporter_ip" {
+  value = docker_container.prometheus_node_exporter[0].network_data[0].ip_address
+}
+```
+Jika `var.enable_monitoring_agent = false`, resource tersebut memiliki jumlah `count = 0`. Mengakses indeks `[0]` akan langsung melempar pesan fatal: **`Error: Invalid index: index 0 out of range for empty tuple`**!
 
-- siapa owner network;
-- lifecycle dan availability contract;
-- permission read-only yang diperlukan;
-- apa yang terjadi jika object hilang;
-- apakah nama lookup stabil atau bisa menunjuk object berbeda.
-
-Data source tidak boleh dipakai untuk menghindari state ownership terhadap resource yang sebenarnya dikelola project ini. Jika module harus membuat network, gunakan `resource`; jika network shared dikelola platform team, gunakan data source dan contract.
-
-## 5. Collection Type dan Validation
-
-Gunakan type yang memperlihatkan bentuk data:
+**Solusi SRE yang Benar:** Gunakan operator ternary atau fungsi `try()`:
 
 ```hcl
-variable "ports" {
-  type = set(number)
-  default = [8080, 8081]
+# SOLUSI BENAR & AMAN:
+output "exporter_ip" {
+  description = "IP address monitoring agent jika diaktifkan."
+  value       = var.enable_monitoring_agent ? docker_container.prometheus_node_exporter[0].network_data[0].ip_address : "DISABLED"
+}
 
-  validation {
-    condition     = alltrue([for port in var.ports : port >= 1024 && port <= 65535])
-    error_message = "Semua port harus non-privileged dan valid."
-  }
+# Atau menggunakan sintaks 'splat' [*] dan one():
+output "exporter_id" {
+  description = "ID kontainer monitoring (null jika nonaktif)."
+  value       = one(docker_container.prometheus_node_exporter[*].id)
 }
 ```
 
-`set` tidak menjamin index; cocok untuk nilai unik tanpa urutan penting. `list` mempertahankan index tetapi rawan churn jika item di tengah dihapus. `map(object(...))` cocok untuk key stabil dan metadata per instance. Jangan mengubah jenis collection tanpa review karena address dan diff dapat berubah.
+---
 
-## 6. Dependency dan Lifecycle
+## 5. Data Source vs Resource: Memahami Batasan Kepemilikan (Ownership)
 
-Referensi seperti `docker_image.web.image_id` membuat dependency implicit. Gunakan `depends_on` hanya ketika dependency tidak terlihat dari expression, misalnya side effect provider atau prerequisite eksternal yang memang telah disepakati.
-
-```hcl
-module "web" {
-  source = "../../modules/web-server"
-
-  name  = "sre-web"
-  image = docker_image.web.image_id
-}
-```
-
-`depends_on` yang terlalu luas membuat graph serial, plan kurang informatif, dan replacement lebih besar. `lifecycle { create_before_destroy = true }` tidak selalu menghindari downtime; nama/port/provider constraint dapat mencegah coexistence. Uji pada disposable environment.
-
-## 7. Address Review
-
-Sebelum apply, cari perubahan berikut:
+Salah satu konsep yang wajib dipahami di modul produksi adalah membedakan kapan kita harus menggunakan blok **`resource`** dan kapan harus menggunakan blok **`data`**:
 
 ```text
-+  module.web["new"].docker_container.this
--  module.web["old"].docker_container.this
--/+ module.web["public"].docker_container.this
+┌─────────────────────────────────┬─────────────────────────────────┐
+│ BLOK RESOURCE                   │ BLOK DATA (DATA SOURCE)         │
+├─────────────────────────────────┼─────────────────────────────────┤
+│ **Kepemilikan Penuh (CRUD):**   │ **Hanya Membaca (Read-Only):**  │
+│ OpenTofu bertanggung jawab      │ OpenTofu HANYA membaca objek    │
+│ membuat fisik, mengubah, dan    │ yang SUDAH DIBUAT DULUAN oleh   │
+│ menghancurkan objek tersebut.   │ tim/sistem lain di luar proyek. │
+├─────────────────────────────────┼─────────────────────────────────┤
+│ Mengubah siklus hidup di server │ **Nol Efek Samping Fisik:**     │
+│ nyata saat di-apply/destroy.    │ Tidak akan pernah membuat atau  │
+│                                 │ menghapus objek fisik di server.│
+├─────────────────────────────────┼─────────────────────────────────┤
+│ Contoh: Membuat kontainer baru, │ Contoh: Membaca ID VPC jaringan │
+│ membuat subnet bridge baru.     │ bersama yang dikelola tim NetOps│
+└─────────────────────────────────┴─────────────────────────────────┘
 ```
 
-Pertanyaan review:
+### Contoh Praktik Penggunaan Data Source:
+Bayangkan tim infrastruktur pusat (*Platform Team*) sudah membuatkan jaringan Docker bersama bernama `shared-core-network`. Proyek aplikasi Anda tidak boleh menghapus network tersebut, melainkan hanya perlu menyambungkan kontainer Anda ke sana:
 
-1. Apakah key baru/rename benar-benar dimaksudkan?
-2. Apakah port/nama dapat coexist saat replacement?
-3. Apakah deletion menyentuh object yang owner-nya benar?
-4. Apakah `count` index bergeser?
-5. Apakah data source menunjuk object yang benar?
-6. Apakah `depends_on` menyebabkan graph terlalu luas?
+```hcl
+# 1. BACA JARINGAN YANG SUDAH ADA DI SERVER VIA DATA SOURCE:
+data "docker_network" "existing_platform_net" {
+  name = "shared-core-network"
+}
 
-Gunakan `tofu graph` untuk memahami dependency, tetapi graph bukan pengganti plan review dan runtime validation.
+# 2. SAMBUNGKAN KONTAINER KITA MENGGUNAKAN ID DARI DATA SOURCE TERSEBUT:
+resource "docker_container" "app_service" {
+  name  = "sre-custom-api"
+  image = "nginx:1.27.4-alpine"
 
-## Troubleshooting
+  networks_advanced {
+    name = data.docker_network.existing_platform_net.name
+  }
+}
+```
 
-### `Invalid for_each argument`
+> [!WARNING]
+> **Anti-Pattern Data Source:**
+> Jangan gunakan `data` source untuk membaca resource yang sebenarnya dideklarasikan di dalam file proyek HCL Anda sendiri. Itu adalah tanda bahwa arsitektur modular Anda mengalami kekacauan referensi. Gunakan referensi ekspresi langsung (`docker_network.my_net.id`).
 
-Key `for_each` harus diketahui sebelum apply dan tidak boleh bergantung pada value yang belum diketahui. Bentuk input sebagai map key yang diketahui; jangan memakai ID resource yang baru dibuat sebagai key.
+---
 
-### Semua instance terganti setelah list berubah
+## 6. Validasi Koleksi Kompleks Menggunakan HCL Expressions
 
-Kemungkinan `count` index bergeser atau input immutable berubah. Bandingkan address dan pertimbangkan map `for_each` dengan key stabil. Migration address harus direncanakan, bukan dilakukan dengan edit state manual.
+Untuk menjamin bahwa data input dari tim developer tidak menyebabkan konflik di server, kita dapat menggabungkan fungsi-fungsi HCL tingkat lanjut (`alltrue`, `can`, `regex`, `keys`, `values`) di dalam blok `validation {}`:
 
-### Output conditional error index out of range
+### Contoh Validasi: Memastikan Seluruh Port Berada di Rentang Non-Root
+```hcl
+variable "assigned_ports" {
+  type        = list(number)
+  description = "Daftar port yang ingin dibuka untuk layanan kontainer."
+  default     = [18080, 18081, 18082]
 
-Resource dengan `count = 0` tidak memiliki `[0]`. Gunakan conditional yang sama atau `try(...)` dengan pemahaman terhadap null, lalu tambahkan acceptance test.
+  validation {
+    # Memeriksa apakah SEMUA angka di dalam list berada di rentang 1024 s.d. 65535
+    condition     = alltrue([for p in var.assigned_ports : p >= 1024 && p <= 65535])
+    error_message = "Seluruh port yang didaftarkan wajib berada di rentang port aman (1024-65535)."
+  }
 
-### Data source menemukan object yang salah
+  validation {
+    # Memeriksa apakah tidak ada duplikasi nomor port di dalam list yang sama!
+    condition     = length(var.assigned_ports) == length(distinct(var.assigned_ports))
+    error_message = "DILARANG mendaftarkan nomor port yang sama berulang kali (terdeteksi duplikasi port)!"
+  }
+}
+```
 
-Nama lookup tidak cukup stabil atau environment/backend salah. Verifikasi provider endpoint, directory, identity, owner, dan identifier. Jangan membuat resource duplicate sebagai workaround.
+---
 
-### `depends_on` menghasilkan replacement besar
+## 7. Pola Kegagalan (Failure Modes) & Panduan Diagnosa
 
-Periksa apakah dependency seharusnya implicit atau hanya pada resource tertentu. Kurangi edge setelah review plan dan test disposable.
+| Pesan Kesalahan OpenTofu | Penyebab Akar (*Root Cause*) | Solusi Pemulihan SRE |
+|---|---|---|
+| `Error: Invalid for_each argument` | Kunci map pada `for_each` bergantung pada nilai dinamis yang baru diketahui saat apply (*dynamic unknown values*). | Kunci (*keys*) pada `for_each` WAJIB berupa string statis yang sudah pasti diketahui sebelum eksekusi dimulai. |
+| `Error: Invalid index: index 0 out of range` | Anda mencoba membaca output dari resource kondisional yang disetel `count = 0` (nonaktif). | Gunakan operator ternary `cond ? res[0].val : null` atau fungsi `one(res[*].val)`. |
+| `Error: data.docker_network.existing: not found` | Objek eksternal yang ingin dibaca oleh Data Source belum pernah dibuat di server fisik. | Pastikan nama network/objek sudah benar atau koordinasikan dengan tim penyedia infrastruktur. |
+| `Seluruh server ter-replace tak terduga` | Anda menggunakan `count` dan baru saja menghapus elemen di awal/tengah list variabel. | Segera batalkan apply (`Ctrl+C`), dan migrasikan struktur kode dari `count` ke `for_each`. |
 
-## Acceptance Checklist
+---
 
-- [ ] `for_each` memakai map key stabil dan address dicatat.
-- [ ] `count` hanya dipakai untuk instance homogen; index churn dijelaskan.
-- [ ] Conditional menjelaskan dampak `false` terhadap lifecycle.
-- [ ] Data source memiliki owner/read-only contract.
-- [ ] Collection type dan validation sesuai semantics.
-- [ ] Dependency graph tidak dibuat serial tanpa alasan.
-- [ ] Plan review mencari create/delete/replace dan address change.
-- [ ] Contoh tidak memuat secret atau resource production.
+## 8. Ringkasan Praktis & Cheatsheet Instansiasi
 
-## Catatan SRE
+```bash
+# 1. Menampilkan daftar resource yang dibuat menggunakan for_each
+tofu state list | grep 'module.web_cluster'
 
-Resource address adalah identitas operasional. Rename key, perubahan index, dan conditional false dapat menghasilkan deletion walaupun diff HCL tampak kecil. Perlakukan address sebagai API state dan review seperti database migration.
+# 2. Menginspeksi satu instans spesifik di dalam map for_each
+tofu state show 'module.web_cluster["frontend"].docker_container.this'
 
-## Kaitan dengan Modul Berikutnya
+# 3. Menghapus satu instans terisolasi tanpa mengganggu instans lain di map
+tofu state rm 'module.web_cluster["frontend"].docker_container.this'
 
-- [04 — Secret Handling dan CI Plan](04-secret-handling-dan-ci-plan.md) membahas bagaimana plan dan input ini diproses oleh CI.
-- [LAB-01 — Modul Reusable Web Server](lab/LAB-01-modul-reusable-web-server.md) mempraktikkan `for_each` pada resource disposable.
-- Modul 3.3 — Konteks On-Prem masih menyusul; modul tersebut akan menerapkan pola collection pada provider on-prem.
+# 4. Memverifikasi rencana tanpa mengeksekusi mutasi
+tofu plan
+```
+
+---
+
+## 9. Cek Pemahaman Mandiri
+
+1. Jelaskan fenomena *Index Churn (The Shift-and-Destroy Trap)* pada penggunaan konstruksi `count`! Mengapa menghapus satu item di awal list dapat memicu kehancuran seluruh server berikutnya?
+2. Kapan sebuah resource sebaiknya diinstansiasi menggunakan `for_each` dibandingkan menggunakan `count`? Berikan contoh kasus nyata di lingkungan produksi!
+3. Bagaimana cara yang aman untuk mengambil atribut output dari sebuah resource yang menggunakan kondisional `count = var.enabled ? 1 : 0` tanpa memicu error *Invalid index 0 out of range* saat kondisinya bernilai `false`?
+4. Jelaskan perbedaan mendasar antara blok `resource` dengan blok `data` (Data Source) dari segi batasan kepemilikan (*ownership boundary*) dan efek samping terhadap siklus hidup objek fisik di server!
+5. Mengapa kunci (*keys*) pada deklarasi `for_each` wajib berupa nilai statis yang sudah diketahui sebelum tahap `tofu apply` dimulai?
+
+---
+
+*Langkah Selanjutnya:* Masuk ke [04 — Secret Handling dan CI Plan](file:///Users/muzma/Developer/repos/it-oss/training/BootcampSRE/materi/fase-3-opentofu/modul-3.2-modul-pola-produksi/04-secret-handling-dan-ci-plan.md) untuk mempelajari bagaimana melindungi data rahasia (*secrets*) agar tidak bocor ke dalam repositori Git atau state publik, merancang pipeline CI/CD yang terisolasi, dan menyerahkan metadata aman ke Ansible.

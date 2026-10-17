@@ -1,247 +1,309 @@
-# 04 — Secret Handling dan CI Plan
+# 04 — Pengelolaan Rahasia (Secret Handling) & Pipeline CI/CD Plan
 
-> **Tujuan:** merancang boundary secret dan pipeline plan yang aman tanpa menganggap masking output, `.gitignore`, atau approval sebagai pengganti secret manager.
+> **Ringkasan:** Salah satu celah keamanan terbesar dalam implementasi Infrastructure as Code (IaC) adalah kebocoran kredensial rahasia (*secret leakage*) ke dalam repositori Git publik, log pipeline CI/CD, atau file state yang tidak terenkripsi. Dokumen ini membedah peta 6 titik paparan rahasia (*The 6 Secret Exposure Points*), merancang integrasi variabel lingkungan aman, memahami arsitektur Vault dan SOPS, mendesain batas penyerahan (*handoff*) metadata non-rahasia dari OpenTofu ke Ansible, hingga membangun alur pipeline CI/CD bertingkat yang memiliki gerbang persetujuan (*Approval Gate*) ketat.
 
-## Tujuan Belajar
+---
 
-Peserta dapat:
+## 1. Analogi Pemula: Kurir Brankas Khusus vs Menempelkan Kunci di Papan Pengumuman
 
-- membedakan secret input, state exposure, output, log, dan artifact;
-- memilih environment variable, Vault, SOPS, atau secret manager sesuai boundary;
-- menyusun CI `fmt`, `validate`, `plan` dengan approval;
-- menerapkan policy untuk mencegah apply environment yang salah;
-- menyerahkan metadata minimum ke Ansible tanpa mengekspos credential.
+Bagi pemula, menyisipkan password langsung di dalam file konfigurasi terasa sangat praktis:
+> *"Kenapa saya tidak menuliskan `password = 'SuperSecret123'` langsung di file `main.tf`? Kan repositori Git saya bersifat privat, jadi aman-aman saja!"*
 
-## 1. Secret Boundary
+Mari kita gunakan analogi keamanan fisik:
 
-Secret boundary menjawab empat pertanyaan:
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 ANALOGI KUNCI BRANKAS VS PAPAN PENGUMUMAN LOBI              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  [ ANTI-PATTERN: MENEMPELKAN KUNCI DI PAPAN PENGUMUMAN LOBI (HARDCODED) ]   │
+│  Anda menulis nomor kombinasi brankas uang kantor di atas kertas memo, lalu │
+│  menempelkannya di papan pengumuman lobi kantor (Meng-commit ke Git).       │
+│  - Masalah: Meskipun satpam gedung berkata "Gedung ini privat hanya untuk   │
+│    karyawan", siapa pun yang berjalan lewat lobi (staf magang, vendor AC,   │
+│    tamu luar) bisa memotret nomor kombinasi tersebut.                       │
+│  - Sekali kertas memo itu terfoto (masuk ke Git Commit History), nomor      │
+│    tersebut akan abadi di internet selamanya meskipun memonya Anda copot!   │
+│                                                                             │
+│  [ PENDEKATAN SRE PROFESIONAL: PETUGAS KURIR BRANKAS DENGAN KUNCI SEMENTARA]│
+│  Nomor kombinasi brankas disimpan di brankas pusat terenkripsi (**Vault**). │
+│  - Ketika pintu brankas harus dibuka, kurir khusus beridentitas resmi       │
+│    (**CI/CD Runner IAM Role**) meminta kunci sementara yang hanya berlaku   │
+│    selama 10 menit (**Short-Lived Ephemeral Token**).                       │
+│  - Kurir membuka pintu brankas di ruang tertutup tanpa ada yang melihat,   │
+│    lalu kunci tersebut otomatis kedaluwarsa dan musnah seketika!            │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-1. Di mana secret dibuat dan disimpan?
-2. Identity mana yang boleh membacanya?
-3. Apakah provider/resource menulisnya ke state?
-4. Bagaimana secret dirotasi, direvoke, dan diaudit?
+---
 
-OpenTofu dapat menerima input sensitif, tetapi provider mungkin menyimpan atribut tersebut di state. Karena itu, jangan menganggap `sensitive = true` atau environment variable membuat state bebas secret.
+## 2. Peta 6 Titik Paparan Rahasia (The 6 Secret Exposure Points)
+
+Banyak engineer mengira jika kode HCL mereka bersih dari teks password, maka rahasia mereka sudah 100% aman. Faktanya, di dalam siklus operasional OpenTofu, ada **enam titik kebocoran rahasia** yang wajib diawasi secara ketat oleh tim SRE:
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    ENAM TITIK RAWAN KEBOCORAN RAHASIA                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. KODE HCL DI REPOSITORI GIT ──► Password tertulis polos di *.tf / *.tfvars│
+│  2. RIWAYAT TERMINAL SHELL     ──► Flag -var="pass=xxx" terekam di history   │
+│  3. STATE FILE (*.tfstate)     ──► TERSIMPAN TELANJANG (PLAINTEXT DECODED!)  │
+│  4. BINARY PLAN ARTIFACT       ──► File tfplan menyimpan isi selisih secret  │
+│  5. OUTPUT LOG CI/CD RUNNER    ──► Nilai variabel tercetak di layar console  │
+│  6. BACKUP & CRASH LOGS        ──► File dump memori saat OpenTofu crash      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+> [!CAUTION]
+> **Hukum Mutlak Keamanan State:**
+> **State file (`terraform.tfstate`) MENYIMPAN SELURUH NILAI SENSITIF DALAM BENTUK MENTAH (PLAINTEXT)!**
+> Meskipun Anda menyetel `sensitive = true` pada variabel atau output, itu **HANYA MENYEMBUNYIKAN TAMPILAN DI TERMINAL CLI**, bukan mengenkripsi isi file state. Siapa pun yang memiliki hak baca ke bucket S3/MinIO state Anda dapat membaca seluruh password database dan private key perusahaan Anda!
+
+---
+
+## 3. Tiga Arsitektur Pengelolaan Rahasia Standar Industri
+
+Bagaimana cara memasukkan nilai rahasia (seperti password root database atau token API) ke dalam OpenTofu tanpa pernah menuliskannya di kode HCL?
+
+### Metode 1: Environment Variables CI/CD (Protected & Masked)
+Di pipeline GitLab CI/CD atau GitHub Actions, rahasia disimpan di menu *Settings ──► CI/CD ──► Variables* sebagai variabel yang ditandai **Protected** dan **Masked**.
+
+Runner CI/CD menyuntikkan nilai tersebut saat runtime menggunakan prefix khusus **`TF_VAR_<nama_variabel>`**:
+
+```bash
+# Di dalam skrip runner CI/CD (Bukan di laptop lokal!):
+export TF_VAR_database_password="$DB_PROD_SECRET_PASSWORD"
+
+# OpenTofu otomatis membaca TF_VAR_database_password ke variable "database_password"
+tofu plan -out=prod.tfplan
+
+# Segera bersihkan variabel dari lingkungan shell setelah selesai
+unset TF_VAR_database_password
+```
+
+---
+
+### Metode 2: HashiCorp Vault / Secret Manager (Dynamic Ephemeral Secrets)
+Untuk lingkungan enterprise berskala besar, password tidak dibuat statis oleh manusia. OpenTofu dapat berintegrasi dengan **HashiCorp Vault** untuk meminta kredensial sementara (*just-in-time dynamic credentials*):
 
 ```hcl
-variable "registry_password" {
-  description = "Credential ephemeral dari secret mechanism CI; tidak boleh dicommit."
-  type        = string
-  sensitive   = true
+# Membaca password dinamis dari Vault yang hanya berlaku selama 1 jam (TTL = 1h)
+data "vault_generic_secret" "db_credentials" {
+  path = "secret/data/production/database"
 }
 
-output "registry_password" {
-  value     = var.registry_password
-  sensitive = true
+resource "docker_container" "db" {
+  name  = "production-mysql"
+  image = "mysql:8.0"
+
+  env = [
+    # Nilai diambil langsung dari memori Vault, tanpa pernah ada di file Git!
+    "MYSQL_ROOT_PASSWORD=${data.vault_generic_secret.db_credentials.data["root_password"]}"
+  ]
 }
 ```
 
-Contoh ini hanya menjelaskan metadata sensitivity. Jangan mengisi nilai nyata pada repository, shell history, issue, log, atau evidence.
+---
 
-**Secret, token, PAT, kubeconfig, dan kredensial lain tidak boleh disimpan atau di-commit sebagai plain text.**
-
-## 2. Pilihan Mekanisme
-
-### Environment variable / credential helper
-
-Cocok untuk lab atau provider yang mendukung credential chain. Nilai diberikan oleh secret mechanism lokal/CI dan tidak ditulis ke HCL.
-
-```bash
-export TF_VAR_registry_password="$(secret-helper read ci/registry-password)"
-tofu plan -out=lab.tfplan
-unset TF_VAR_registry_password
-```
-
-Command di atas adalah pola konseptual. Pastikan helper tidak mencetak value, shell history tidak merekam secret, process policy sesuai, dan plan/state backend memiliki permission minimum. Jangan mengganti `secret-helper` dengan secret literal.
-
-### Vault atau secret manager
-
-Vault/secret manager menyimpan secret dan memberikan lease/identity-based access. OpenTofu dapat memakai provider/data source atau wrapper CI, tetapi desain harus menjawab TTL, renewal, revoke, audit, state exposure, dan failure mode. Jangan menulis hasil secret ke output atau artifact.
-
-### SOPS
-
-SOPS dapat mengenkripsi file konfigurasi tertentu dengan age/KMS/PGP, tetapi repository tetap harus memiliki policy key access, rotation, review, dan dekripsi hanya pada runner yang dipercaya. File terenkripsi bukan alasan untuk mencetak hasil dekripsi atau menyimpan state di Git. Pastikan provider tidak mempersist value sensitif ke plan/state tanpa perlindungan.
-
-### Secret injection ke Ansible
-
-Metadata OpenTofu seperti hostname, IP, role, dan environment boleh diteruskan ke Ansible. Password SSH, token bootstrap, kubeconfig, dan private key tetap diambil Ansible/runner dari secret mechanism yang terpisah.
-
-## 3. State dan Artifact Exposure
-
-Sensitive value dapat muncul pada:
-
-- state local/remote;
-- plan binary dan `tofu show`;
-- provider debug log;
-- CI job output;
-- crash log;
-- shell history/process inspection;
-- backup dan artifact retention.
-
-Guardrail:
-
-```gitignore
-.terraform/
-*.tfstate
-*.tfstate.*
-*.tfvars
-*.tfplan
-crash.log
-crash.*.log
-```
-
-`.gitignore` mencegah sebagian commit baru, bukan menghapus data yang sudah pernah ter-commit, tercopy, masuk backup, atau tampil di log. State backend perlu encryption at rest/in transit, permission, versioning, locking, backup, retention, dan audit sesuai policy.
-
-Jika plan artifact perlu disimpan untuk approval:
-
-- simpan hanya pada CI storage berpermission minimum;
-- tetapkan retention pendek dan audit access;
-- jangan mengunggah raw plan ke issue/public artifact;
-- redaction tidak boleh dianggap dapat menghapus secret dari binary;
-- apply hanya plan yang dibuat dari commit, backend, provider, input, dan environment target yang sama.
-
-## 4. CI Pipeline Read-Only dan Mutation
-
-Tahap pull/merge request sebaiknya read-only:
+### Metode 3: SOPS (Secrets OPerationS) + age / PGP
+Jika perusahaan Anda belum memiliki server Vault terpusat, standar industri menggunakan tool **SOPS** buatan Mozilla yang dipadukan dengan enkripsi kunci **age**:
 
 ```text
-checkout commit
-  ↓
-tofu fmt -check
-  ↓
-tofu init (backend context terkontrol)
-  ↓
-tofu validate
-  ↓
-tofu plan -out=environment.tfplan
-  ↓
-tofu show -no-color environment.tfplan (redacted policy)
-  ↓
-review + policy checks
+  File Asli (secrets.dec.yaml) ──► Di-encrypt oleh SOPS ──► File Git (secrets.enc.yaml)
+  (Password: Rahasia123)                                     (Password: ENC[AES256_GCM,data:...])
 ```
 
-Apply adalah tahap terpisah dengan identity dan approval berbeda:
+- File `secrets.enc.yaml` **sangat aman di-commit ke repositori Git publik** karena seluruh isinya terenkripsi kriptografis tingkat militer.
+- Di dalam pipeline CI/CD, runner yang memegang *Private Key age* mendekripsi file tersebut ke direktori memori sementara (*ramdisk `/dev/shm`*) untuk dikonsumsi oleh OpenTofu saat eksekusi.
+
+---
+
+## 4. Pemisahan Peran: Handoff Metadata OpenTofu ke Ansible
+
+Di dalam arsitektur operasional Bootcamp SRE 2026, kita menerapkan pembagian batas wewenang yang tegas antara alat *Provisioning* (OpenTofu) dengan alat *Configuration Management* (Ansible):
 
 ```text
-approved commit + approved plan
-  ↓
-verify environment/backend/plan metadata
-  ↓
-tofu apply environment.tfplan
-  ↓
-provider validation + service health check
-  ↓
-record evidence dan change result
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                  BATAS WEWENANG: OPENTOFU VS ANSIBLE                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  [ TUGAS OPENTOFU (INFRASTRUCTURE PROVISIONING) ]                           │
+│  ├── 1. Membuat VM di Proxmox atau kontainer di Docker.                     │
+│  ├── 2. Mengalokasikan IP Address, Network Bridge, dan Virtual Disk.        │
+│  └── 3. MENGEKSPOS METADATA NON-SECRET KE ANSIBLE (Hostname, IP, Role).    │
+│                                                                             │
+│       │ Handoff Metadata Non-Secret (inventory.json)                        │
+│       ▼ OpenTofu DILARANG KERAS mengirim password SSH / Private Key!        │
+│                                                                             │
+│  [ TUGAS ANSIBLE (HOST CONFIGURATION & HARDENING) ]                         │
+│  ├── 1. Mengambil kredensial SSH dari Ansible Vault / Runner Key terpisah.  │
+│  ├── 2. Melakukan OS Hardening, konfigurasi UFW firewall, dan sysctl tuning.│
+│  └── 3. Menginstal k3s cluster, etcd initialization, dan systemd service.   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Jangan menyamakan `plan exit code 2` dengan failure service; pahami semantics versi OpenTofu/CI. Jangan memakai `-auto-approve` sebagai default. Production apply harus memiliki approval, concurrency control, lock, change window, dan stop condition.
-
-Contoh guardrail shell non-secret:
-
-```bash
-set -eu
-
-expected_environment="dev"
-actual_environment="${TOFU_ENVIRONMENT:?TOFU_ENVIRONMENT wajib diset oleh job}"
-
-if [ "$actual_environment" != "$expected_environment" ]; then
-  printf 'environment mismatch; stop tanpa apply\n' >&2
-  exit 1
-fi
-
-tofu fmt -check
-tofu validate
-tofu plan -out="${expected_environment}.tfplan"
-```
-
-Dalam implementasi nyata, pastikan quoting dan input job diuji; contoh tersebut tidak memasukkan credential dan tidak menjalankan apply.
-
-## 5. Policy Checks
-
-Policy minimal memeriksa:
-
-- directory dan environment allowlist;
-- backend bucket/key tidak shared lintas environment;
-- provider version dipin dan binary checksum diverifikasi sesuai policy;
-- image tag/digest tidak mutable `latest`;
-- resource address dan action `delete/replace` memerlukan review;
-- production apply memerlukan approval;
-- plan artifact dibuat dari commit yang sedang direview;
-- tidak ada secret literal, raw state, atau private key di diff;
-- target/resource scope tidak menggunakan wildcard berbahaya;
-- output hanya metadata yang disetujui.
-
-Policy dapat berupa linter, Open Policy Agent/Conftest, CI script, atau review checklist. Tool policy tidak menghapus kebutuhan memahami provider behavior dan runtime health.
-
-## 6. Promotion dan Rollback
-
-Promotion harus menyimpan relasi:
-
-```text
-commit SHA → module version → provider lock → environment input
-          → backend key → plan artifact → approval → apply result
-```
-
-Plan artifact tidak boleh dipindahkan antar-environment. Buat plan baru pada target environment. Rollback module berarti memilih commit/module version sebelumnya, membuat plan target baru, membaca replacement/downtime, lalu approval. Restore state bukan rollback resource otomatis dan dapat memperbesar drift.
-
-## 7. Handoff OpenTofu ke Ansible
-
-Output yang layak diteruskan:
+### Format Output yang Layak Diserahkan ke Ansible (`outputs.tf`):
+Hanya keluarkan informasi topologi jaringan dan peran node, **tanpa menyertakan rahasia apa pun**:
 
 ```hcl
 output "ansible_inventory_metadata" {
-  description = "Metadata non-secret untuk inventory tahap berikutnya."
+  description = "Metadata topologi node untuk dikonsumsi oleh dynamic inventory Ansible."
   value = {
-    for key, instance in module.node : key => {
-      hostname   = instance.hostname
-      address    = instance.ip_address
-      role       = instance.role
-      environment = var.environment
+    for name, instance in module.k3s_nodes : name => {
+      ansible_host = instance.ip_address
+      node_role    = instance.role          # control-plane atau worker
+      environment  = var.environment
     }
   }
 }
 ```
 
-Fase 4 dapat mengubah metadata tersebut menjadi inventory sementara atau input pipeline. OpenTofu tidak seharusnya memasang package OS, mengelola file konfigurasi daemon, atau menyimpan SSH credential. Ansible mengerjakan bootstrap, hardening, package, service, dan prasyarat k3s; Helm/GitOps kemudian menangani aplikasi.
+Ansible akan membaca metadata IP di atas, lalu melakukan autentikasi SSH menggunakan kunci privat yang tersimpan aman di dalam *Ansible Vault* atau *SSH Agent* lokal runner, bukan dari OpenTofu!
 
-## Troubleshooting
+---
 
-### Secret terlihat pada log CI
+## 5. Perancangan Pipeline CI/CD yang Aman (The Secure IaC Pipeline)
 
-Hentikan job dan cegah artifact publication. Rotasi/revoke secret melalui owner, hapus exposure sesuai incident procedure, periksa history/log/cache, lalu perbaiki masking dan secret injection. Jangan hanya menghapus baris dari README.
+Di lingkungan produksi enterprise, seorang engineer **dilarang menjalankan `tofu apply` langsung dari laptop pribadinya**. Seluruh perubahan infrastruktur wajib dieksekusi melalui pipeline CI/CD terpusat yang memiliki tahapan pengawasan ketat:
 
-### `sensitive` membuat output tidak terlihat
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 ALUR PIPELINE GITOPS CI/CD ENTERPRISE                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  [ FASE 1: PULL / MERGE REQUEST (READ-ONLY GATE) ]                          │
+│  Pipeline berjalan otomatis pada setiap commit PR baru:                     │
+│  1. $ tofu fmt -check       (Pastikan format rapi)                          │
+│  2. $ tofu validate         (Pastikan sintaks benar)                        │
+│  3. $ tofu plan -out=tfplan (Hitung selisih perubahan)                      │
+│  4. Hasil plan di-render ke komentar PR untuk ditinjau bersama rekan tim!   │
+│  *KUNCI KEAMANAN:* Runner di Fase 1 HANYA MEMILIKI AKSES READ-ONLY ke cloud!│
+│                                                                             │
+│       │ PR di-review & disetujui oleh Senior SRE / Lead Engineer            │
+│       ▼ Merge ke branch 'main'                                              │
+│                                                                             │
+│  [ FASE 2: MANUAL APPROVAL GATE (REMBOK PENGAMAN AKHIR) ]                   │
+│  Pipeline berhenti sejenak dan menunggu tombol konfirmasi fisik manusia.   │
+│  Hanya engineer berwenang (*Maintainer*) yang memiliki hak klik "Approve".  │
+│                                                                             │
+│       │ Klik Tombol "Approve Production Apply"                              │
+│       ▼                                                                     │
+│                                                                             │
+│  [ FASE 3: PRODUCTION APPLY (RESTRICTED RUNNER) ]                            │
+│  Dieksekusi oleh Runner khusus yang memiliki hak tulis (*Write IAM Role*):  │
+│  1. $ tofu apply tfplan     (Menerapkan TEPAT plan yang sudah di-review!)   │
+│  2. Validasi status kesehatan layanan (*Smoke Test*)                        │
+│  3. File binary tfplan langsung dimusnahkan dari cache (*Artifact Purge*).  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-Itu perilaku presentasi, bukan error. Gunakan metadata non-secret untuk evidence dan inspeksi state dengan redaction. Jangan menonaktifkan sensitivity hanya agar pipeline mudah dibaca.
+---
 
-### Plan artifact tidak dapat di-apply
+## 6. Contoh Skrip Pipeline Guardrail Non-Secret (`deploy-guardrail.sh`)
 
-Periksa commit, provider lock, input, backend key, workspace, dan versi OpenTofu. Buat plan baru jika context berubah. Jangan memaksa apply plan dari environment lain.
+Untuk mencegah terjadinya salah tembak lingkungan di dalam pipeline otomatisasi, kita memasang skrip pelindung (*guardrail*) yang akan membatalkan proses seketika jika parameter lingkungan tidak cocok:
 
-### CI menjalankan plan pada prod
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-Hentikan job. Verifikasi path, environment variable, backend, identity, branch rules, dan allowlist. Tambahkan guardrail yang gagal tertutup (fail closed) sebelum init/plan pada environment sensitif.
+# 1. Validasi Keberadaan Variabel Lingkungan Wajib
+TARGET_ENV="${ENVIRONMENT:?ERROR: Variabel ENVIRONMENT wajib didefinisikan!}"
+ALLOWED_ENVS=("dev" "staging" "prod")
 
-### Vault/SOPS tidak tersedia
+# 2. Periksa apakah target environment terdaftar di whitelist resmi
+if [[ ! " ${ALLOWED_ENVS[*]} " =~ " ${TARGET_ENV} " ]]; then
+  echo "[FATAL] Lingkungan '${TARGET_ENV}' tidak dikenal! Eksekusi dibatalkan demi keamanan."
+  exit 1
+fi
 
-Gunakan jalur statis: dokumentasikan boundary, identity, lifecycle, rotation, audit, state exposure, dan failure mode. Tandai integrasi runtime **belum diverifikasi**; jangan mengganti dengan secret literal.
+echo "[INFO] Memulai validasi dan perencanaan untuk lingkungan: ${TARGET_ENV}"
+cd "environments/${TARGET_ENV}"
 
-## Acceptance Checklist
+# 3. Validasi Statis Kode HCL
+tofu fmt -check
+tofu init -input=false
+tofu validate
 
-- [ ] Secret boundary menjelaskan storage, identity, state exposure, rotation, dan audit.
-- [ ] Contoh hanya memakai placeholder/helper, tanpa nilai credential nyata.
-- [ ] `sensitive` dijelaskan sebagai masking, bukan encryption.
-- [ ] CI memiliki `fmt`, `validate`, `plan`, policy, artifact retention, dan approval.
-- [ ] Apply/promotion tidak auto-approve dan memakai context target yang sama.
-- [ ] Handoff hanya mengeluarkan metadata non-secret ke Ansible.
-- [ ] Vault/SOPS/secret rotation tidak diklaim runtime bila belum dieksekusi.
+# 4. Generate Rencana Eksekusi Binary Terkunci
+tofu plan -input=false -out="${TARGET_ENV}.tfplan"
 
-## Catatan SRE
+echo "[SUCCESS] Plan untuk ${TARGET_ENV} berhasil dibuat dan dikunci di ${TARGET_ENV}.tfplan."
+```
 
-Secret leakage adalah incident meskipun command gagal dan resource tidak berubah. Audit log, plan artifact, state backup, dan CI cache sama pentingnya dengan HCL. Desain pipeline agar gagal sebelum secret dicetak dan agar identity apply lebih sempit daripada identity plan.
+---
 
-## Kaitan dengan Modul Berikutnya
+## 7. Prosedur Insiden: Apa yang Wajib Dilakukan Jika Secret Bocor?
 
-- [LAB-02 — Environment Promotion dan Secret Safety](lab/LAB-02-environment-promotion-dan-secret-safety.md) mempraktikkan review context secara statis/disposable.
-- [Modul 3.1 — State, Remote, Import, Drift](../modul-3.1-dasar-opentofu/04-state-remote-import-drift.md) membahas state exposure dan recovery.
-- Modul 3.3 — Konteks On-Prem masih menyusul; modul tersebut akan meneruskan metadata ke boundary provisioning/configuration.
+Jika secara tidak sengaja Anda melihat ada password, API key, atau private key yang ter-commit ke dalam repositori Git atau tercetak di log terminal:
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 SOP DARURAT KEBOCORAN RAHASIA (SECRET LEAK)                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 1. ANGGAP KUNCI TELAH DIRETAS SEKETIKA ITU JUGA!                            │
+│    Jangan buang waktu dengan berpikir "Mungkin belum ada yang membaca".     │
+│                                                                             │
+│ 2. REVOKE & ROTATE LANGSUNG PADA SUMBERNYA:                                 │
+│    Segera buka dashboard database atau cloud provider, matikan password     │
+│    yang bocor, dan terbitkan password baru yang berbeda!                    │
+│                                                                             │
+│ 3. PERBAIKI STATE & PIPELINE:                                               │
+│    Perbarui nilai variabel rahasia di Secret Manager / Protected Variables. │
+│                                                                             │
+│ 4. BERSIHKAN RIWAYAT GIT (GIT PURGE):                                       │
+│    Gunakan tool 'git-filter-repo' atau 'BFG Repo-Cleaner' untuk menghapus   │
+│    commit yang mengandung rahasia dari riwayat Git secara permanen.         │
+│                                                                             │
+│ 5. TULIS BLAMELESS POSTMORTEM:                                              │
+│    Analisis mengapa linter pra-commit (*gitleaks*) gagal menangkap insiden. │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 8. Pola Kegagalan (Failure Modes) & Panduan Diagnosa
+
+| Gejala Masalah | Titik Investigasi | Penyebab Akar (*Root Cause*) | Solusi Pemulihan SRE |
+|---|---|---|---|
+| `Kredensial tercetak polos di log CI/CD console` | Output job terminal CI/CD | Variabel input tidak ditandai `sensitive = true`, atau skrip shell menggunakan `set -x` (*xtrace*) yang mencetak seluruh baris perintah. | Tambahkan `sensitive = true` pada variabel HCL dan matikan opsi `set -x` pada skrip runner shell. |
+| `Error: Failed to read tfplan file` | `tofu apply tfplan` | File plan binary dibuat dari versi OpenTofu atau arsitektur OS yang berbeda dari runner eksekutor. | Pastikan container image runner CI pada tahap *plan* dan tahap *apply* identik 100%. |
+| `Pipeline apply gagal dengan 403 Forbidden` | `tofu apply` | Runner CI/CD tahap apply tidak memiliki hak akses IAM / token yang cukup ke target API cloud. | Periksa izin Service Account / IAM Role yang dikaitkan ke runner khusus deployment. |
+| `Sensitive output bernilai <sensitive>` | `tofu output` | Nilai output memang ditandai `sensitive = true` untuk melindungi dari rekaman mata. | Ini adalah perilaku normal. Jika butuh membacanya secara terisolasi di mesin aman, gunakan `tofu output -json`. |
+
+---
+
+## 9. Ringkasan Praktis & Cheatsheet Keamanan Rahasia
+
+```bash
+# 1. Memeriksa keberadaan secret yang tidak sengaja ter-commit sebelum push Git
+git diff --staged | grep -iE 'password|secret|token|private_key'
+
+# 2. Mengeksekusi plan tanpa interaktivitas manusia di pipeline CI/CD
+tofu plan -input=false -out=prod.tfplan
+
+# 3. Menerapkan plan yang telah disetujui tanpa konfirmasi ulang prompt
+tofu apply -input=false prod.tfplan
+
+# 4. Membaca metadata inventory non-secret untuk diserahkan ke Ansible
+tofu output -json ansible_inventory_metadata > inventory.json
+```
+
+---
+
+## 10. Cek Pemahaman Mandiri
+
+1. Mengapa menambahkan atribut `sensitive = true` pada sebuah variabel HCL tidak otomatis melindungi kerahasiaan password tersebut jika file `terraform.tfstate` berhasil diunduh oleh peretas?
+2. Sebutkan minimal 4 dari 6 titik paparan rahasia (*Secret Exposure Points*) di mana sebuah kredensial dapat bocor di luar kode HCL Git!
+3. Jelaskan batasan pembagian tugas (*handoff boundary*) antara OpenTofu dengan Ansible! Mengapa OpenTofu dilarang keras menjadi perantara pengiriman password SSH root ke Ansible?
+4. Apa fungsi dari pemisahan tahap *Pull Request Plan (Read-Only)* dengan tahap *Main Branch Apply (Restricted Identity)* di dalam perancangan pipeline CI/CD enterprise?
+5. Jika sebuah token API produksi secara tidak sengaja ter-commit ke dalam repositori Git publik, sebutkan 3 langkah darurat pertama yang wajib dieksekusi oleh seorang SRE!
+
+---
+
+*Selamat! Anda telah menguasai seluruh kurikulum pola produksi OpenTofu.* Lanjutkan ke [LAB-01 — Modul Reusable Web Server](file:///Users/muzma/Developer/repos/it-oss/training/BootcampSRE/materi/fase-3-opentofu/modul-3.2-modul-pola-produksi/lab/LAB-01-modul-reusable-web-server.md) dan [LAB-02 — Environment Promotion dan Secret Safety](file:///Users/muzma/Developer/repos/it-oss/training/BootcampSRE/materi/fase-3-opentofu/modul-3.2-modul-pola-produksi/lab/LAB-02-environment-promotion-dan-secret-safety.md) untuk mempraktikkan seluruh teknik arsitektur modular ini secara langsung di lingkungan lab Anda!
